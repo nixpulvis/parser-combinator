@@ -4,6 +4,7 @@
          (struct-out lit-node)
          (struct-out wrap-node)
          (struct-out seq-node)
+         define-lexer
          lit
          char-except
          alt
@@ -43,6 +44,12 @@
 (struct result (node remaining) #:transparent)
 
 ; A Lexer is a [String -> Result]
+
+; Lexer -> Lexer : Transformation
+; Makes things lazy.
+(define-syntax-rule (define-lexer name body)
+  (define (name s)
+    (body s)))
 
 ; String -> Lexer
 (define (lit str)

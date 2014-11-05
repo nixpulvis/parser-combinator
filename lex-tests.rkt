@@ -93,6 +93,8 @@
 ; plus tests
 (check-expect ((plus (lit "+")) "123")
               'error)
+(check-expect ((plus (lit "+")) "")
+              'error)
 (check-expect ((plus (lit "+")) "+123")
               (result (seq-node 'rep (lit-node "+") (emp-node)) "123"))
 

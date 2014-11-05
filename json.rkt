@@ -22,22 +22,22 @@
 ; -------------------------------------
 
 ; Lexer
-(define SPACE (lambda (s)
-  ((alt*
-    (lit " ") (lit "\t") (lit "\n") (lit "\r")) s)))
+(define-lexer SPACE
+  (alt*
+    (lit " ") (lit "\t") (lit "\n") (lit "\r")))
 
 ; Lexer -> Lexer
 (define (spacey l)
   (unwrap (star SPACE) l (star SPACE)))
 
 ; Lexer
-(define HEXIT (lambda (s)
-  ((alt* DIGIT (lit "a") (lit "b") (lit "c") (lit "d") (lit "e") (lit "f")
-               (lit "A") (lit "B") (lit "C") (lit "D") (lit "E") (lit "F")) s)))
+(define-lexer HEXIT
+  (alt* DIGIT (lit "a") (lit "b") (lit "c") (lit "d") (lit "e") (lit "f")
+               (lit "A") (lit "B") (lit "C") (lit "D") (lit "E") (lit "F")))
 
 ; Lexer
-(define STRING (lambda (s)
-  ((wrap 'string
+(define-lexer STRING
+  (wrap 'string
          (lit "\"")
          (star (alt* (char-except "\\" "\"")
                      (lit "\\\"")
@@ -49,20 +49,20 @@
                      (lit "\\r")
                      (lit "\\t")
                      (seq* 'hex (lit "\\u") HEXIT HEXIT HEXIT HEXIT)))
-         (lit "\"")) s)))
+         (lit "\"")))
 
 ; Lexer
-(define DIGIT+ (lambda (s)
-  ((alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7")
-         (lit "8") (lit "9")) s)))
+(define-lexer DIGIT+
+  (alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7")
+         (lit "8") (lit "9")))
 
 ; Lexer
-(define DIGIT (lambda (s)
-  ((alt* (lit "0") DIGIT+) s)))
+(define-lexer DIGIT
+  (alt* (lit "0") DIGIT+))
 
 ; Lexer
-(define NUMBER (lambda (s)
-  ((seq* 'number
+(define-lexer NUMBER
+  (seq* 'number
          (opt (lit "-"))
          (alt* (lit "0") (seq* 'significand
                                DIGIT+
@@ -70,43 +70,43 @@
          (opt (seq* 'decimal (lit ".") (star DIGIT)))
          (opt (seq* 'exponent (alt* (lit "e") (lit "E"))
                     (opt (alt* (lit "+") (lit "-")))
-                    (star DIGIT)))) s)))
+                    (star DIGIT)))))
 
 ; Lexer
-(define PAIR (lambda (s)
-  ((seq* 'pair STRING (spacey (lit ":")) VALUE) s)))
+(define-lexer PAIR
+  (seq* 'pair STRING (spacey (lit ":")) VALUE))
 
 ; Lexer
-(define OBJECT (lambda (s)
-  ((wrap 'object
+(define-lexer OBJECT
+  (wrap 'object
          (spacey (lit "{"))
          (opt (seq* 'object-first
                     PAIR
                     (star (seq* 'object-rest
                                 (spacey (lit ","))
                                 PAIR))))
-         (spacey (lit "}"))) s)))
+         (spacey (lit "}"))))
 
 ; Lexer
-(define ARRAY (lambda (s)
-  ((wrap 'array
+(define-lexer ARRAY
+  (wrap 'array
          (spacey (lit "["))
          (opt (seq* 'array-first
                     VALUE
                     (star (seq* 'array-rest
                                 (spacey (lit ","))
                                 VALUE))))
-         (spacey (lit "]"))) s)))
+         (spacey (lit "]"))))
 
 ; Lexer
-(define VALUE (lambda (s)
-  ((alt* (spacey STRING)
+(define-lexer VALUE
+  (alt* (spacey STRING)
          (spacey NUMBER)
          (spacey OBJECT)
          (spacey ARRAY)
          (spacey (lit "true"))
          (spacey (lit "false"))
-         (spacey (lit "null"))) s)))
+         (spacey (lit "null"))))
 
 ; ------------------------
 ; ----- JSON Parsing -----
@@ -208,4 +208,6 @@
 ; String -> JSON
 (define (string->json str)
   (parse-json-value (lex VALUE str)))
+
+
 

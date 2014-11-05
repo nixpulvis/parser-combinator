@@ -12,19 +12,21 @@
 ;        | NUMBER "/" EXPR
 ;        | NUMBER
 
-(define (EXPR s)
-  ((alt* (seq* 'plus NUMBER (lit "+") EXPR)
-         (seq* 'minus NUMBER (lit "-") EXPR)
-         (seq* 'times NUMBER (lit "*") EXPR)
-         (seq* 'divide NUMBER (lit "/") EXPR)
-         NUMBER) s))
+(define-lexer EXPR
+  (alt* (seq* 'plus NUMBER (lit "+") EXPR)
+        (seq* 'minus NUMBER (lit "-") EXPR)
+        (seq* 'times NUMBER (lit "*") EXPR)
+        (seq* 'divide NUMBER (lit "/") EXPR)
+        NUMBER))
 
-(define (NUMBER s)
-  ((seq* 'number DIGIT (star DIGIT)) s))
+(define-lexer NUMBER
+  (seq* 'number DIGIT (star DIGIT)))
 
-(define (DIGIT s)
-  ((alt* (lit "0") (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6")
-         (lit "7") (lit "8") (lit "9")) s))
+(define-lexer DIGIT
+  (alt* (lit "0") (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6")
+         (lit "7") (lit "8") (lit "9")))
+
+(lex EXPR "1+2")
 
 ; Parsing
 
