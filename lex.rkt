@@ -1,5 +1,11 @@
 #lang racket
 
+; TODO:
+; - Remove `char-except` in place of something a bit more flexible.
+; - Allow `seq` to join AST nodes using "construction decorator" functions.
+; - Merge `wrap` and `unwrap` into one function, this will depend on
+;   work on passing AST construction decorators.
+
 (provide (struct-out emp-node)
          (struct-out lit-node)
          (struct-out wrap-node)
