@@ -1,28 +1,3 @@
-# parser-combinator
-
-Simple Racket parser library, and default (tested) JSON implementation.
-
-## Install
-
-```sh
-raco pkg install parser-combinator
-```
-
-## JSON Usage
-
-```racket
-#lang racket
-(require parser-combinator/json)
-
-(string->json "[]")
-;=> '()
-(string->json "[1, {\"foo\": false}, 2]")
-;=> (list 1 (list (json-pair "foo" #f)) 2)
-```
-
-## Parser Usage
-
-```racket
 #lang racket
 (require parser-combinator/parse)
 
@@ -57,12 +32,5 @@ raco pkg install parser-combinator
 (println (parse "-0"))
 (println (parse "1"))
 (println (parse "140"))
-```
 
-## Tests
 
-Run all of the tests.
-
-```sh
-raco test *tests.rkt
-```

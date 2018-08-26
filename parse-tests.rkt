@@ -1,6 +1,6 @@
 #lang racket
 (require test-engine/racket-tests)
-(require "lex.rkt")
+(require "parse.rkt")
 
 ; lit tests
 (check-expect ((lit "-") "-1.35")
@@ -150,57 +150,57 @@
 (check-expect ((unwrap (lit "+") (lit "!") (lit "+")) "+!-")
               'error)
 
-; lex tests
-(check-expect (lex (emp) "") (emp-node))
-(check-error (lex (lit "a") "b") "bad input, got error")
-(check-error (lex (emp) "{}") "bad input, had leftover text \"{}\"")
+; parse tests
+(check-expect (parse (emp) "") (emp-node))
+(check-error (parse (lit "a") "b") "bad input, got error")
+(check-error (parse (emp) "{}") "bad input, had leftover text \"{}\"")
 
 ; star-foldr tests
 (check-expect (star-foldr (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (lit "hh") "hh"))
+                          (parse (lit "hh") "hh"))
               empty)
 (check-expect (star-foldr (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (star (lit "h")) "hh"))
+                          (parse (star (lit "h")) "hh"))
               (list (lit-node "h") (lit-node "h")))
 (check-expect (star-foldr (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (star (alt (lit "a") (lit "b"))) "ab"))
+                          (parse (star (alt (lit "a") (lit "b"))) "ab"))
               (list (lit-node "a") (lit-node "b")))
 (check-expect (star-foldr (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (star (seq 'ab (lit "a") (lit "b"))) "abab"))
+                          (parse (star (seq 'ab (lit "a") (lit "b"))) "abab"))
               (list (seq-node 'ab (lit-node "a") (lit-node "b"))
                     (seq-node 'ab (lit-node "a") (lit-node "b"))))
 
 ; star-foldl tests
 (check-expect (star-foldl (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (lit "hh") "hh"))
+                          (parse (lit "hh") "hh"))
               empty)
 (check-expect (star-foldl (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (star (lit "h")) "hh"))
+                          (parse (star (lit "h")) "hh"))
               (list (lit-node "h") (lit-node "h")))
 (check-expect (star-foldl (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (star (alt (lit "a") (lit "b"))) "ab"))
+                          (parse (star (alt (lit "a") (lit "b"))) "ab"))
               (list (lit-node "b") (lit-node "a")))
 (check-expect (star-foldl (lambda (ast acc) (cons ast acc))
                           empty
-                          (lex (star (seq 'ab (lit "a") (lit "b"))) "abab"))
+                          (parse (star (seq 'ab (lit "a") (lit "b"))) "abab"))
               (list (seq-node 'ab (lit-node "a") (lit-node "b"))
                     (seq-node 'ab (lit-node "a") (lit-node "b"))))
 
 ; flatten-ast tests
-(check-expect (flatten-ast (lex (emp) ""))
+(check-expect (flatten-ast (parse (emp) ""))
               "")
-(check-expect (flatten-ast (lex (lit ".") "."))
+(check-expect (flatten-ast (parse (lit ".") "."))
               ".")
-(check-expect (flatten-ast (lex (wrap '+ (lit "+") (lit "!") (lit "+")) "+!+"))
+(check-expect (flatten-ast (parse (wrap '+ (lit "+") (lit "!") (lit "+")) "+!+"))
               "!")
-(check-expect (flatten-ast (lex (seq* 'ab (lit "a") (lit "b")) "ab"))
+(check-expect (flatten-ast (parse (seq* 'ab (lit "a") (lit "b")) "ab"))
               "ab")
 
 (test)

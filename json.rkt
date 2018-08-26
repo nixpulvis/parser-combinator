@@ -1,5 +1,5 @@
 #lang racket
-(require "lex.rkt")
+(require "parse.rkt")
 
 (provide (struct-out json-pair)
          string->json
@@ -22,7 +22,7 @@
 ; -------------------------------------
 
 ; Lexer
-(define-lexer SPACE
+(define-parser SPACE
   (alt*
     (lit " ") (lit "\t") (lit "\n") (lit "\r")))
 
@@ -31,12 +31,12 @@
   (unwrap (star SPACE) l (star SPACE)))
 
 ; Lexer
-(define-lexer HEXIT
+(define-parser HEXIT
   (alt* DIGIT (lit "a") (lit "b") (lit "c") (lit "d") (lit "e") (lit "f")
                (lit "A") (lit "B") (lit "C") (lit "D") (lit "E") (lit "F")))
 
 ; Lexer
-(define-lexer STRING
+(define-parser STRING
   (wrap 'string
          (lit "\"")
          (star (alt* (char-except "\\" "\"")
@@ -52,16 +52,16 @@
          (lit "\"")))
 
 ; Lexer
-(define-lexer DIGIT+
+(define-parser DIGIT+
   (alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7")
          (lit "8") (lit "9")))
 
 ; Lexer
-(define-lexer DIGIT
+(define-parser DIGIT
   (alt* (lit "0") DIGIT+))
 
 ; Lexer
-(define-lexer NUMBER
+(define-parser NUMBER
   (seq* 'number
          (opt (lit "-"))
          (alt* (lit "0") (seq* 'significand
@@ -73,11 +73,11 @@
                     (star DIGIT)))))
 
 ; Lexer
-(define-lexer PAIR
+(define-parser PAIR
   (seq* 'pair STRING (spacey (lit ":")) VALUE))
 
 ; Lexer
-(define-lexer OBJECT
+(define-parser OBJECT
   (wrap 'object
          (spacey (lit "{"))
          (opt (seq* 'object-first
@@ -88,7 +88,7 @@
          (spacey (lit "}"))))
 
 ; Lexer
-(define-lexer ARRAY
+(define-parser ARRAY
   (wrap 'array
          (spacey (lit "["))
          (opt (seq* 'array-first
@@ -99,7 +99,7 @@
          (spacey (lit "]"))))
 
 ; Lexer
-(define-lexer VALUE
+(define-parser VALUE
   (alt* (spacey STRING)
          (spacey NUMBER)
          (spacey OBJECT)
@@ -207,7 +207,7 @@
 
 ; String -> JSON
 (define (string->json str)
-  (parse-json-value (lex VALUE str)))
+  (parse-json-value (parse VALUE str)))
 
 
 

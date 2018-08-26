@@ -10,7 +10,7 @@
          (struct-out lit-node)
          (struct-out wrap-node)
          (struct-out seq-node)
-         define-lexer
+         define-parser
          lit
          char-except
          alt
@@ -23,7 +23,7 @@
          star
          wrap
          unwrap
-         lex
+         parse
          star-foldr
          star-foldl
          flatten-ast
@@ -53,7 +53,7 @@
 
 ; Lexer -> Lexer : Transformation
 ; Makes things lazy.
-(define-syntax-rule (define-lexer name body)
+(define-syntax-rule (define-parser name body)
   (define (name s)
     (body s)))
 
@@ -81,11 +81,11 @@
       (if (symbol? r1) (p2 s) r1))))
 
 ; Lexer Lexer ... -> Lexer
-(define (alt* lexer . lexers)
+(define (alt* parser . parsers)
   (lambda (s)
-    ((if (empty? lexers)
-            lexer
-            (alt lexer (apply alt* lexers))) s)))
+    ((if (empty? parsers)
+            parser
+            (alt parser (apply alt* parsers))) s)))
 
 ; Symbol Lexer Lexer -> Lexer
 (define (seq label p1 p2)
@@ -100,16 +100,16 @@
                         (result-remaining r2))))))))
 
 ; Symbol Lexer Lexer ... -> Lexer
-(define (seq* label lexer . lexers)
+(define (seq* label parser . parsers)
   (lambda (s)
-    ((if (empty? lexers)
-         lexer
-         (seq label lexer (apply seq* label lexers))) s)))
+    ((if (empty? parsers)
+         parser
+         (seq label parser (apply seq* label parsers))) s)))
 
 ; Lexer -> Lexer
-(define (opt lexer)
+(define (opt parser)
   (lambda (s)
-    (let ([r (lexer s)])
+    (let ([r (parser s)])
       (if (symbol? r) (result (emp-node) s) r))))
 
 ; -> Lexer
@@ -118,16 +118,16 @@
     (result (emp-node) s)))
 
 ; Lexer -> Lexer
-(define (plus lexer)
+(define (plus parser)
   (lambda (s)
-    ((seq 'rep lexer (star lexer)) s)))
+    ((seq 'rep parser (star parser)) s)))
 
 ; Lexer -> Lexer
-(define (star lexer)
+(define (star parser)
   (lambda (s)
-    ((alt (seq 'rep lexer (lambda (s) (if (string=? s "")
+    ((alt (seq 'rep parser (lambda (s) (if (string=? s "")
                                           (result (emp-node) "")
-                                          ((star lexer) s))))
+                                          ((star parser) s))))
          (emp)) s)))
 
 ; Symbol Lexer Lexer Lexer -> Lexer
@@ -150,8 +150,8 @@
                    (result-remaining r))))))
 
 ; Lexer String -> AST
-(define (lex lexer str)
-  (let ([r (lexer str)])
+(define (parse parser str)
+  (let ([r (parser str)])
     (cond [(symbol? r)
            (error "bad input, got error")]
           [(> (string-length (result-remaining r)) 0)
