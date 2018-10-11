@@ -49,15 +49,15 @@
 ; - (result AST String)
 (struct result (node remaining) #:transparent)
 
-; A Lexer is a [String -> Result]
+; A Parser is a [String -> Result]
 
-; Lexer -> Lexer : Transformation
+; Parser -> Parser : Transformation
 ; Makes things lazy.
 (define-syntax-rule (define-parser name body)
   (define (name s)
     (body s)))
 
-; String -> Lexer
+; String -> Parser
 (define (lit str)
   (lambda (s)
     (let ([len (string-length str)])
@@ -66,7 +66,7 @@
           (result (lit-node str) (substring s len))
           'error))))
 
-; String ... -> Lexer
+; String ... -> Parser
 (define (char-except . chars)
   (lambda (s)
     (if (and (>= (string-length s) 1)
@@ -74,20 +74,20 @@
         (result (lit-node (substring s 0 1)) (substring s 1 (string-length s)))
         'error)))
 
-; Lexer Lexer -> Lexer
+; Parser Parser -> Parser
 (define (alt p1 p2)
   (lambda (s)
     (let ([r1 (p1 s)])
       (if (symbol? r1) (p2 s) r1))))
 
-; Lexer Lexer ... -> Lexer
+; Parser Parser ... -> Parser
 (define (alt* parser . parsers)
   (lambda (s)
     ((if (empty? parsers)
             parser
             (alt parser (apply alt* parsers))) s)))
 
-; Symbol Lexer Lexer -> Lexer
+; Symbol Parser Parser -> Parser
 (define (seq label p1 p2)
   (lambda (s)
     (let ([r1 (p1 s)])
@@ -99,30 +99,30 @@
                 (result (seq-node label (result-node r1) (result-node r2))
                         (result-remaining r2))))))))
 
-; Symbol Lexer Lexer ... -> Lexer
+; Symbol Parser Parser ... -> Parser
 (define (seq* label parser . parsers)
   (lambda (s)
     ((if (empty? parsers)
          parser
          (seq label parser (apply seq* label parsers))) s)))
 
-; Lexer -> Lexer
+; Parser -> Parser
 (define (opt parser)
   (lambda (s)
     (let ([r (parser s)])
       (if (symbol? r) (result (emp-node) s) r))))
 
-; -> Lexer
+; -> Parser
 (define (emp)
   (lambda (s)
     (result (emp-node) s)))
 
-; Lexer -> Lexer
+; Parser -> Parser
 (define (plus parser)
   (lambda (s)
     ((seq 'rep parser (star parser)) s)))
 
-; Lexer -> Lexer
+; Parser -> Parser
 (define (star parser)
   (lambda (s)
     ((alt (seq 'rep parser (lambda (s) (if (string=? s "")
@@ -130,7 +130,7 @@
                                           ((star parser) s))))
          (emp)) s)))
 
-; Symbol Lexer Lexer Lexer -> Lexer
+; Symbol Parser Parser Parser -> Parser
 (define (wrap label l b r)
   (lambda (s)
     (let ([r ((seq* 'wrap l b r) s)])
@@ -140,7 +140,7 @@
                              (seq-node-left (seq-node-right (result-node r))))
                    (result-remaining r))))))
 
-; Lexer Lexer Lexer -> Lexer
+; Parser Parser Parser -> Parser
 (define (unwrap l b r)
   (lambda (s)
     (let ([r ((seq* 'wrap l b r) s)])
@@ -149,7 +149,7 @@
            (result (seq-node-left (seq-node-right (result-node r)))
                    (result-remaining r))))))
 
-; Lexer String -> AST
+; Parser String -> AST
 (define (parse parser str)
   (let ([r (parser str)])
     (cond [(symbol? r)

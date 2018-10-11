@@ -21,21 +21,21 @@
 ; ----- JSON Context Free Grammar -----
 ; -------------------------------------
 
-; Lexer
+; Parser
 (define-parser SPACE
   (alt*
     (lit " ") (lit "\t") (lit "\n") (lit "\r")))
 
-; Lexer -> Lexer
+; Parser -> Parser
 (define (spacey l)
   (unwrap (star SPACE) l (star SPACE)))
 
-; Lexer
+; Parser
 (define-parser HEXIT
   (alt* DIGIT (lit "a") (lit "b") (lit "c") (lit "d") (lit "e") (lit "f")
                (lit "A") (lit "B") (lit "C") (lit "D") (lit "E") (lit "F")))
 
-; Lexer
+; Parser
 (define-parser STRING
   (wrap 'string
          (lit "\"")
@@ -51,16 +51,16 @@
                      (seq* 'hex (lit "\\u") HEXIT HEXIT HEXIT HEXIT)))
          (lit "\"")))
 
-; Lexer
+; Parser
 (define-parser DIGIT+
   (alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7")
          (lit "8") (lit "9")))
 
-; Lexer
+; Parser
 (define-parser DIGIT
   (alt* (lit "0") DIGIT+))
 
-; Lexer
+; Parser
 (define-parser NUMBER
   (seq* 'number
          (opt (lit "-"))
@@ -72,11 +72,11 @@
                     (opt (alt* (lit "+") (lit "-")))
                     (star DIGIT)))))
 
-; Lexer
+; Parser
 (define-parser PAIR
   (seq* 'pair STRING (spacey (lit ":")) VALUE))
 
-; Lexer
+; Parser
 (define-parser OBJECT
   (wrap 'object
          (spacey (lit "{"))
@@ -87,7 +87,7 @@
                                 PAIR))))
          (spacey (lit "}"))))
 
-; Lexer
+; Parser
 (define-parser ARRAY
   (wrap 'array
          (spacey (lit "["))
@@ -98,7 +98,7 @@
                                 VALUE))))
          (spacey (lit "]"))))
 
-; Lexer
+; Parser
 (define-parser VALUE
   (alt* (spacey STRING)
          (spacey NUMBER)
