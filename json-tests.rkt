@@ -12,6 +12,12 @@
               "-_.,+- ")
 (check-expect (parse-json-string (parse STRING "\"(λ(x)(x x))\""))
               "(λ(x)(x x))")
+(check-expect (parse-json-string (parse STRING "\"tab\\there\""))
+              "tab\\there")
+(check-error (parse STRING "\"tab\there\""))
+(check-error (parse STRING "\"nul\u0000\""))
+(check-error (parse STRING "\"us\u001F\""))
+(check-error (parse STRING "\"\\x\""))
 
 ; parse-json-number tests
 (check-expect (parse-json-number (parse NUMBER "1"))
@@ -28,6 +34,14 @@
               0.0123 0.0001)
 (check-within (parse-json-number (parse NUMBER "-123.456e-2"))
               -1.23456 0.0001)
+(check-expect (parse-json-number (parse NUMBER "1e5"))
+              100000)
+(check-error (parse NUMBER "1e"))
+(check-error (parse NUMBER "1e+"))
+(check-error (parse NUMBER "1."))
+(check-error (parse NUMBER "1.e5"))
+(check-error (string->json "1e"))
+(check-error (string->json "[1.]"))
 
 ; parse-json-pair tests
 (check-expect (parse-json-pair (parse PAIR "\"\":\"\""))

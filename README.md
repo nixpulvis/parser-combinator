@@ -61,6 +61,14 @@ raco pkg install parser-combinator
 
 ## Tests
 
+The tests require `compiler-lib` (provides `raco test`) and `htdp-lib` (provides
+`test-engine/racket-tests`). Both ship with the full Racket distribution. On a
+minimal install (e.g. Homebrew's `minimal-racket`), install them first.
+
+```sh
+raco pkg install --auto --skip-installed compiler-lib htdp-lib
+```
+
 Run all of the tests.
 
 ```sh
