@@ -87,14 +87,14 @@ raco pkg install --auto --skip-installed benchmark
 Benchmark the working tree.
 
 ```sh
-racket scripts/bench.rkt
+scripts/bench.rkt
 ```
 
 Name git refs to compare them instead, each checked out into a temporary
 worktree, for example to check a branch for regressions against `master`.
 `--plot` also writes a plot of each parser's time relative to Racket's. See
-`racket scripts/bench.rkt --help` for the other options.
+`scripts/bench.rkt --help` for the other options.
 
 ```sh
-racket scripts/bench.rkt --plot bench.png master my-branch
+scripts/bench.rkt --plot bench.png master my-branch
 ```

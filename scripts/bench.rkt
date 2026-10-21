@@ -1,9 +1,10 @@
+#!/usr/bin/env racket
 #lang racket/base
 ; Benchmarks string->json against Racket's own JSON parser,
 ; string->jsexpr, and against string->json at other git refs, using the
 ; benchmark package.
 ;
-;   racket scripts/bench.rkt [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
+;   scripts/bench.rkt [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree. With no refs, the working tree is
