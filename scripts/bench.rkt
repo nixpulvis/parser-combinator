@@ -17,6 +17,7 @@
          racket/cmdline
          racket/file
          racket/format
+         racket/path
          racket/list
          racket/runtime-path
          racket/string
@@ -82,10 +83,10 @@
              (git "worktree" "remove" "--force" (path->string dir)))
            (delete-directory/files tmp))))))
 
-; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Path-String #f) -> Void
+; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Plot #f) -> Void
 ; Benchmarks string->json from each checkout, and Racket's string->jsexpr
 ; too if `racket?`, in which case times are also shown relative to it.
-(define (bench checkouts racket? trials sizes plot-file-name)
+(define (bench checkouts racket? trials sizes plot)
   (let* ([parsers
           (append (for/list ([c (in-list checkouts)])
                     (cons (car c)
@@ -116,20 +117,21 @@
            #:num-trials trials
            #:make-name what-name)])
     (print-table results (> (length parsers) 1) racket?)
-    (when plot-file-name
+    (when plot
       (parameterize ([plot-x-ticks no-ticks])
         (plot-file (render-benchmark-alts (list (if racket? racket-json (car (first parsers))))
                                           results
                                           #:format-opts car
                                           #:normalize? racket?)
-                   plot-file-name
+                   (car plot)
+                   (cdr plot)
                    #:title "string->json"
                    #:x-label #f
                    #:y-label (if racket?
                                  (format "time relative to ~a" racket-json)
                                  "mean ms")
                    #:width 1000))
-      (printf "\nplot written to ~a\n" plot-file-name))))
+      (printf "\nplot written to ~a\n" (car plot)))))
 
 ; [Listof benchmark-result] Boolean Boolean -> Void
 ; Prints each result's mean and 95% confidence interval, computed as the
@@ -184,11 +186,39 @@
       (raise-user-error 'bench "~a must be a positive integer, given ~s" flag str))
     n))
 
+; The extensions plot-file can write, and the format of each.
+(define plot-formats
+  '(("png" . png) ("jpg" . jpeg) ("jpeg" . jpeg) ("bmp" . bmp) ("xbm" . xbm)
+    ("xpm" . xpm) ("pdf" . pdf) ("ps" . ps) ("svg" . svg)))
+
+; A Plot is a (cons Path Symbol), a file to plot to and its format.
+
+; String -> Plot
+; The Plot for --plot's file. Raises a user error, so that a bad --plot
+; fails before any benchmark runs, if plot-file can't write the file's
+; extension, or if the file's directory doesn't exist.
+(define (plot-target file)
+  (let* ([path (path->complete-path file)]
+         [ext (path-get-extension path)]
+         [format (and ext
+                      (assoc (string-downcase (substring (bytes->string/utf-8 ext) 1))
+                             plot-formats))])
+    (unless format
+      (raise-user-error 'bench "--plot can't write ~a; use one of ~a"
+                        file
+                        (string-join (for/list ([f (in-list plot-formats)])
+                                       (string-append "." (car f)))
+                                     ", ")))
+    (let-values ([(dir name must-be-dir?) (split-path path)])
+      (unless (directory-exists? dir)
+        (raise-user-error 'bench "--plot can't write ~a; ~a doesn't exist" file dir)))
+    (cons path (cdr format))))
+
 (module+ main
   (define racket? #f)
   (define trials 30)
   (define sizes '(4000 8000 16000))
-  (define plot-file-name #f)
+  (define plot #f)
   (define refs
     (command-line
      #:once-each
@@ -199,10 +229,10 @@
      [("--sizes") ns "Comma-separated input sizes in characters (default 4000,8000,16000)"
                   (set! sizes (for/list ([s (in-list (string-split ns ","))])
                                 (positive-integer "--sizes" s)))]
-     [("--plot") file "Also plot the times to file, as .png, .svg, or .pdf"
-                 (set! plot-file-name file)]
+     [("--plot") file "Also plot the times to file, such as a .png, .svg, or .pdf"
+                 (set! plot (plot-target file))]
      #:args refs
      refs))
   (call-with-checkouts refs
                        (lambda (checkouts)
-                         (bench checkouts racket? trials sizes plot-file-name))))
+                         (bench checkouts racket? trials sizes plot))))
