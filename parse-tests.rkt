@@ -147,14 +147,4 @@
 (check-error (parse (lit "a") "b") "bad input, got error")
 (check-error (parse (emp) "{}") "bad input, had leftover text \"{}\"")
 
-; flatten-ast tests
-(check-expect (flatten-ast (parse (emp) ""))
-              "")
-(check-expect (flatten-ast (parse (lit ".") "."))
-              ".")
-(check-expect (flatten-ast (parse (seq* list (lit "a") (star (lit "b")) (lit "c"))
-                                  "abbc"))
-              "abbc")
-(check-error (flatten-ast (list "a" 1)))
-
 (test)

@@ -13,7 +13,6 @@
          star
          unwrap
          parse
-         flatten-ast
          ; TODO: Remove this provide.
          (struct-out result))
 
@@ -145,10 +144,3 @@
            (error "bad input, had leftover text" (result-remaining r))]
           [else
            (result-node r)])))
-
-; AST -> String
-; Appends the strings in `ast`, which is a string or a list of such ASTs.
-(define (flatten-ast ast)
-  (cond [(string? ast) ast]
-        [(list? ast) (apply string-append (map flatten-ast ast))]
-        [else (error "bad input: given" ast)]))

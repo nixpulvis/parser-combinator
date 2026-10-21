@@ -62,7 +62,7 @@
 
 ; Parser
 (define-parser STRING
-  (seq* (lambda (open chars close) (flatten-ast chars))
+  (seq* (lambda (open chars close) (apply string-append (flatten chars)))
          (lit "\"")
          (star (alt* (rx #rx"[^\"\\\u0000-\u001F]")
                      (lit "\\\"")
@@ -88,11 +88,10 @@
 ; Parser
 (define-parser NUMBER
   (seq* (lambda (sign integer fraction exponent)
-          (string->number (string-append "#e"
-                                         (flatten-ast sign)
-                                         (flatten-ast integer)
-                                         (flatten-ast fraction)
-                                         (flatten-ast exponent))))
+          (string->number
+           (apply string-append
+                  "#e"
+                  (flatten (list sign integer fraction exponent)))))
          (opt (lit "-"))
          (alt* (lit "0") (seq* list
                                DIGIT+

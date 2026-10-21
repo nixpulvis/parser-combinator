@@ -47,7 +47,7 @@ raco pkg install parser-combinator
 
 ; AST -> Number
 (define (parse-number ast)
-  (string->number (string-append "#e" (flatten-ast ast))))
+  (string->number (apply string-append "#e" (flatten ast))))
 
 ; String -> Number
 (define (parse str)
