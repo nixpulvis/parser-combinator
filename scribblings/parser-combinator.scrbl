@@ -25,80 +25,67 @@ The package comes with two libraries:
 @; -----------------------------------------------------------------------------
 @section[#:tag "quick"]{Quick Start}
 
-Parsing happens in two steps. First a @tech{Parser} turns a string into a
- @tech{Value}, made of strings for the text that matched and lists for
- sequences and repetitions. Then an ordinary recursive function turns the
- @tech{Value} into the data the program needs.
+A @tech{Parser} turns a string into a @tech{Value}. The constructors given
+ to @racket[seq] and @racket[seq*] decide what that @tech{Value} is, so a
+ grammar can compute the data the program needs while it parses.
 
 Take numbers such as @racket["0"], @racket["-7"], and @racket["140"]. A
  number is an optional minus sign followed by either a lone zero or a
- non-zero digit and any number of further digits:
+ non-zero digit and any number of further digits. Each digit parser uses
+ @racket[string->number] as its constructor, so it produces the digit's
+ value instead of its text:
 
 @examples[#:eval quick-eval #:label #f #:no-result
 (require parser-combinator/parse)
 
 (code:comment "Parser")
+(code:comment "matches the digit 0, producing its value")
+(define-parser ZERO
+  (seq* string->number (lit "0")))
+
+(code:comment "Parser")
+(code:comment "matches a digit 1 through 9, producing its value")
 (define-parser NONZERO-DIGIT
-  (alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5")
-        (lit "6") (lit "7") (lit "8") (lit "9")))
+  (seq* string->number (rx #rx"[1-9]")))
 
 (code:comment "Parser")
+(code:comment "matches any digit, producing its value")
 (define-parser DIGIT
-  (alt (lit "0") NONZERO-DIGIT))
-
-(code:comment "Parser")
-(define-parser NUMBER
-  (seq* list
-        (opt (lit "-"))
-        (alt (lit "0")
-             (seq cons NONZERO-DIGIT (star DIGIT)))))
+  (alt ZERO NONZERO-DIGIT))
 ]
 
-Running a parser with @racket[parse] produces the @tech{Value}. A missing
- sign is @racket['()]:
+A natural number other than zero starts with a non-zero digit, and
+ @racket[foldl] adds the digits after it from left to right. A missing
+ sign is @racket['()], and a minus sign negates the number:
+
+@examples[#:eval quick-eval #:label #f #:no-result
+(code:comment "Natural Natural -> Natural")
+(code:comment "adds the digit d to the end of n")
+(define (add-digit d n)
+  (+ (* 10 n) d))
+
+(code:comment "Parser")
+(code:comment "matches a natural number, producing its value")
+(define-parser NATURAL
+  (alt ZERO
+       (seq (lambda (d ds) (foldl add-digit d ds))
+            NONZERO-DIGIT
+            (star DIGIT))))
+
+(code:comment "Parser")
+(code:comment "matches an integer, producing its value")
+(define-parser NUMBER
+  (seq (lambda (sign n) (if (null? sign) n (- n)))
+       (opt (lit "-"))
+       NATURAL))
+]
+
+Running a parser with @racket[parse] produces the number:
 
 @examples[#:eval quick-eval #:label #f
+(parse NUMBER "0")
 (parse NUMBER "-7")
 (parse NUMBER "140")
-]
-
-To get a number out of the @tech{Value}, design a function that follows
- the grammar. Each digit is a string. Unless the number is a lone zero,
- its digits form a list, which @racket[foldl] walks from left to right:
-
-@examples[#:eval quick-eval #:label #f
-(code:comment "String -> Natural")
-(code:comment "computes the value of the digit d")
-(code:line
- (define (digit->number d)
-   (- (char->integer (string-ref d 0))
-      (char->integer #\0)))
- code:blank)
-(code:comment "String Natural -> Natural")
-(code:comment "adds the digit d to the end of n")
-(code:line
- (define (add-digit d n)
-   (+ (* 10 n) (digit->number d)))
- code:blank)
-(code:comment "Value -> Natural")
-(code:comment "computes the value of the part after the sign")
-(code:line
- (define (integer->number v)
-   (if (string? v)
-       0
-       (foldl add-digit 0 v)))
- code:blank)
-(code:comment "Value -> Integer")
-(code:comment "converts the Value of a number into a number")
-(code:line
- (define (value->number v)
-   (if (string? (car v))
-       (- (integer->number (cadr v)))
-       (integer->number (cadr v))))
- code:blank)
-(value->number (parse NUMBER "0"))
-(value->number (parse NUMBER "-7"))
-(value->number (parse NUMBER "140"))
 ]
 
 Input that is not in the grammar is an error:
@@ -107,9 +94,8 @@ Input that is not in the grammar is an error:
 (eval:error (parse NUMBER "007"))
 ]
 
-The source of @racketmodname[parser-combinator/json] skips the second
- step for a larger grammar: its parsers use @racket[seq] and
- @racket[seq*] constructors to build the data while they parse.
+The source of @racketmodname[parser-combinator/json] builds its data the
+ same way, for a larger grammar.
 
 @include-section["parse.scrbl"]
 @include-section["json.scrbl"]
