@@ -75,10 +75,9 @@ raco test *-tests.rkt
 
 ## Benchmarks
 
-The benchmarks compare `string->json` with Racket's own JSON parser,
-`string->jsexpr`, on generated JSON of a few shapes and sizes. They require the
-[`benchmark`](https://pkgs.racket-lang.org/package/benchmark) package, which
-isn't a dependency of this package.
+The benchmarks time `string->json` on generated JSON of a few shapes and sizes.
+They require the [`benchmark`](https://pkgs.racket-lang.org/package/benchmark)
+package, which isn't a dependency of this package.
 
 ```sh
 raco pkg install --auto --skip-installed benchmark
@@ -91,9 +90,10 @@ scripts/bench.rkt
 ```
 
 Name git refs to compare them instead, each checked out into a temporary
-worktree, for example to check a branch for regressions against `master`.
-`--plot` also writes a plot of each parser's time relative to Racket's. See
-`scripts/bench.rkt --help` for the other options.
+worktree, for example to check a branch for regressions against `master`. Times
+are shown relative to the first ref. `--racket` also benchmarks Racket's own JSON
+parser, `string->jsexpr`, and shows times relative to it instead. `--plot` also
+writes a plot of the times. See `scripts/bench.rkt --help` for the other options.
 
 ```sh
 scripts/bench.rkt --plot bench.png master my-branch

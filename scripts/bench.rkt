@@ -1,14 +1,15 @@
 #!/usr/bin/env racket
 #lang racket/base
-; Benchmarks string->json against Racket's own JSON parser,
-; string->jsexpr, and against string->json at other git refs, using the
-; benchmark package.
+; Benchmarks string->json at git refs against each other, and optionally
+; against Racket's own JSON parser, string->jsexpr, using the benchmark
+; package.
 ;
-;   scripts/bench.rkt [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
+;   scripts/bench.rkt [--racket] [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree. With no refs, the working tree is
-; benchmarked.
+; benchmarked. Times are compared against string->jsexpr with --racket,
+; and otherwise against the first ref.
 (require benchmark
          json
          math/statistics
@@ -81,13 +82,19 @@
              (git "worktree" "remove" "--force" (path->string dir)))
            (delete-directory/files tmp))))))
 
-; [Listof (cons String Path)] Natural [Listof Natural] (U Path-String #f) -> Void
-(define (bench checkouts trials sizes plot-file-name)
+; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Path-String #f) -> Void
+; Benchmarks string->json from each checkout, and Racket's string->jsexpr
+; too if `racket?`. Times are compared against Racket's parser if it ran,
+; and otherwise against the first checkout's.
+(define (bench checkouts racket? trials sizes plot-file-name)
   (let* ([parsers
           (append (for/list ([c (in-list checkouts)])
                     (cons (car c)
                           (dynamic-require (build-path (cdr c) "json.rkt") 'string->json)))
-                  (list (cons racket-json string->jsexpr)))]
+                  (if racket? (list (cons racket-json string->jsexpr)) '()))]
+         ; Nothing to compare against when there is only one parser.
+         [baseline (and (> (length parsers) 1)
+                        (if racket? racket-json (car (first parsers))))]
          ; Inputs are made before timing starts. A What is (list case size),
          ; and names the input `inputs` maps it to.
          [whats (for*/list ([c (in-list cases)] [n (in-list sizes)])
@@ -112,42 +119,50 @@
            #:extract-time 'delta-time
            #:num-trials trials
            #:make-name what-name)])
-    (print-table results)
+    (print-table results baseline)
     (when plot-file-name
       (parameterize ([plot-x-ticks no-ticks])
-        (plot-file (render-benchmark-alts (list racket-json) results
-                                          #:format-opts car)
+        (plot-file (render-benchmark-alts (list (or baseline (car (first parsers))))
+                                          results
+                                          #:format-opts car
+                                          #:normalize? (and baseline #t))
                    plot-file-name
                    #:title "string->json"
                    #:x-label #f
-                   #:y-label (format "time relative to ~a" racket-json)
+                   #:y-label (if baseline
+                                 (format "time relative to ~a" baseline)
+                                 "mean ms")
                    #:width 1000))
       (printf "\nplot written to ~a\n" plot-file-name))))
 
-; [Listof benchmark-result] -> Void
+; [Listof benchmark-result] (U String #f) -> Void
 ; Prints each result's mean and 95% confidence interval, computed as the
-; plots from render-benchmark-alts compute theirs, and its mean relative
-; to Racket's JSON parser on the same input.
-(define (print-table results)
+; plots from render-benchmark-alts compute theirs, and, given a
+; `baseline` parser, its mean relative to that parser's on the same input.
+(define (print-table results baseline)
   (let* ([mean-of (lambda (r) (mean (benchmark-result-trial-times r)))]
-         [baseline (for/hash ([r (in-list results)]
-                              #:when (equal? (benchmark-result-opts r) (list racket-json)))
-                     (values (benchmark-result-name r) (mean-of r)))]
+         [baseline-means (for/hash ([r (in-list results)]
+                                    #:when (equal? (benchmark-result-opts r) (list baseline)))
+                           (values (benchmark-result-name r) (mean-of r)))]
          [rows
           (cons
-           (list "input" "parser" "mean ms" "± ms" "vs json")
+           (append (list "input" "parser" "mean ms" "± ms")
+                   (if baseline (list (format "vs ~a" baseline)) '()))
            (for/list ([r (in-list results)])
              (let* ([times (benchmark-result-trial-times r)]
-                    [m (mean-of r)]
-                    [base (hash-ref baseline (benchmark-result-name r))])
-               (list (benchmark-result-name r)
-                     (car (benchmark-result-opts r))
-                     (~r m #:precision '(= 2))
-                     (~r (* 1.96 (/ (stddev times) (sqrt (length times))))
-                         #:precision '(= 2))
-                     (if (zero? base)
-                         "-"
-                         (string-append (~r (/ m base) #:precision '(= 1)) "x"))))))]
+                    [m (mean-of r)])
+               (append
+                (list (benchmark-result-name r)
+                      (car (benchmark-result-opts r))
+                      (~r m #:precision '(= 2))
+                      (~r (* 1.96 (/ (stddev times) (sqrt (length times))))
+                          #:precision '(= 2)))
+                (if baseline
+                    (let ([base (hash-ref baseline-means (benchmark-result-name r))])
+                      (list (if (zero? base)
+                                "-"
+                                (string-append (~r (/ m base) #:precision '(= 1)) "x"))))
+                    '())))))]
          [widths (apply map (lambda cells (apply max (map string-length cells))) rows)])
     (newline)
     (for ([cells (in-list rows)])
@@ -167,20 +182,24 @@
     n))
 
 (module+ main
+  (define racket? #f)
   (define trials 30)
   (define sizes '(4000 8000 16000))
   (define plot-file-name #f)
   (define refs
     (command-line
      #:once-each
+     [("--racket") "Also benchmark Racket's own JSON parser, string->jsexpr, and compare against it"
+                   (set! racket? #t)]
      [("--trials") n "Times to run each benchmark (default 30)"
                    (set! trials (positive-integer "--trials" n))]
      [("--sizes") ns "Comma-separated input sizes in characters (default 4000,8000,16000)"
                   (set! sizes (for/list ([s (in-list (string-split ns ","))])
                                 (positive-integer "--sizes" s)))]
-     [("--plot") file "Also plot the times relative to Racket's JSON parser to file"
+     [("--plot") file "Also plot the times to file, as .png, .svg, or .pdf"
                  (set! plot-file-name file)]
      #:args refs
      refs))
   (call-with-checkouts refs
-                       (lambda (checkouts) (bench checkouts trials sizes plot-file-name))))
+                       (lambda (checkouts)
+                         (bench checkouts racket? trials sizes plot-file-name))))
