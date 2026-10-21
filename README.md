@@ -72,3 +72,29 @@ Build the manual into `_site/`.
 ```sh
 scripts/build-docs.sh
 ```
+
+## Benchmarks
+
+The benchmarks compare `string->json` with Racket's own JSON parser,
+`string->jsexpr`, on generated JSON of a few shapes and sizes. They require the
+[`benchmark`](https://pkgs.racket-lang.org/package/benchmark) package, which
+isn't a dependency of this package.
+
+```sh
+raco pkg install --auto --skip-installed benchmark
+```
+
+Benchmark the working tree.
+
+```sh
+racket scripts/bench.rkt
+```
+
+Name git refs to compare them instead, each checked out into a temporary
+worktree, for example to check a branch for regressions against `master`.
+`--plot` also writes a plot of each parser's time relative to Racket's. See
+`racket scripts/bench.rkt --help` for the other options.
+
+```sh
+racket scripts/bench.rkt --plot bench.png master my-branch
+```
