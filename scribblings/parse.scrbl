@@ -22,12 +22,16 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  this library produce plain Racket values:
 @itemlist[
  @item{@racket[lit] and @racket[rx] produce the matched text, a string}
- @item{@racket[emp], and @racket[opt] when its parser fails, produce
- @racket['()]}
- @item{@racket[star] and @racket[plus] produce the list of their
- parser's @|Value|s}
+ @item{@racket[emp] produces @racket['()]}
  @item{@racket[seq] and @racket[seq*] produce whatever their
  constructor returns}
+ @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
+ that matched}
+ @item{@racket[opt] produces its parser's @Value, or @racket['()] if its
+ parser fails}
+ @item{@racket[star] and @racket[plus] produce the list of their
+ parser's @|Value|s}
+ @item{@racket[unwrap] produces the @Value of its middle parser}
 ]
 The constructors are where a grammar builds the data the program needs,
  such as a list, a number, or a structure of its own.

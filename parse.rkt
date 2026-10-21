@@ -21,9 +21,12 @@
 
 ; A Value is whatever a parser produces:
 ; - `lit` and `rx` produce the matched String
-; - `emp`, and `opt` when its parser fails, produce '()
-; - `star` and `plus` produce the list of their parser's Values
+; - `emp` produces '()
 ; - `seq` and `seq*` produce whatever their constructor returns
+; - `alt` and `alt*` produce the Value of the parser that matched
+; - `opt` produces its parser's Value, or '() if its parser fails
+; - `star` and `plus` produce the list of their parser's Values
+; - `unwrap` produces the Value of its middle parser
 
 ; A Result is one of:
 ; - 'error
