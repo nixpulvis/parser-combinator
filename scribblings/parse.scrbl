@@ -11,7 +11,7 @@
 
 @title[#:tag "parse"]{Parsers and Combinators}
 
-@defmodule[parser-combinator/parse]
+@defmodule[parser-combinator/parse #:packages ("parser-combinator")]
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "data"]{Data Definitions}

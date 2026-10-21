@@ -31,9 +31,10 @@ A @tech{Parser} turns a string into a @tech{Value}. The constructors given
 
 Take numbers such as @racket["0"], @racket["-7"], and @racket["140"]. A
  number is an optional minus sign followed by either a lone zero or a
- non-zero digit and any number of further digits. Each digit parser uses
- @racket[string->number] as its constructor, so it produces the digit's
- value instead of its text:
+ non-zero digit and any number of further digits. @racket[ZERO] and
+ @racket[NONZERO-DIGIT] use @racket[string->number] as their
+ constructor, so the digit parsers produce each digit's value instead of
+ its text:
 
 @examples[#:eval quick-eval #:label #f #:no-result
 (require parser-combinator/parse)

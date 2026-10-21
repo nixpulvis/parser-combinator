@@ -13,7 +13,7 @@
 
 @title[#:tag "json"]{JSON}
 
-@defmodule[parser-combinator/json]
+@defmodule[parser-combinator/json #:packages ("parser-combinator")]
 
 This library parses text in the JSON data exchange format into Racket
  values. See the @|json-site| for more about JSON. The library is written
@@ -69,10 +69,12 @@ Note that an empty JSON array and an empty JSON object are both
 
 The grammar behind @racket[string->json] is made of the parsers below. A
  few small ones match single characters, and their @|Value|s are the
- matched characters as strings. Then there is one parser for each kind
- of JSON value, which uses @racket[seq] and @racket[seq*] constructors
- to produce the @JSON itself. These parsers are exported so that programs
- can use them directly.
+ matched characters as strings. The rest produce the @JSON itself, using
+ @racket[seq] and @racket[seq*] constructors: @racket[STRING],
+ @racket[NUMBER], @racket[OBJECT], and @racket[ARRAY] for those kinds of
+ value, @racket[PAIR] for one name and value in an object, and
+ @racket[VALUE] for any JSON value. These parsers are exported so that
+ programs can use them directly.
 
 Wherever the grammar allows whitespace around a value or a punctuation
  mark, the parsers skip any number of @racket[SPACE]s with
