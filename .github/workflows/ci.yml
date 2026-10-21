@@ -19,7 +19,10 @@ jobs:
       - name: Install package
         run: raco pkg install --auto --batch --link --name parser-combinator "$GITHUB_WORKSPACE"
       - name: Check package dependencies
-        run: raco setup --check-pkg-deps --unused-pkg-deps --pkgs parser-combinator
+        # Unused deps are only reported as a warning, so fail on the message.
+        run: |
+          raco setup --check-pkg-deps --unused-pkg-deps --pkgs parser-combinator 2>&1 | tee setup.log
+          ! grep -q 'unused dependencies detected' setup.log
       - name: Run tests
         # test-engine reports failures but always exits 0, so require each
         # test file to print its "All N tests passed!" summary.
