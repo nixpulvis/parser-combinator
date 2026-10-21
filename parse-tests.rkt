@@ -151,6 +151,14 @@
 (check-expect ((unwrap (lit "+") (lit "!") (lit "+")) "+!-")
               'error)
 
+; plain function parsers
+; A plain function is given the rest of the input, and its `remaining`
+; tells the combinators where its match ended.
+(check-expect ((seq list (lit "ab") (lambda (s) (result s (substring s 1)))) "abcd")
+              (result (list "ab" "cd") "d"))
+(check-expect ((seq list (lit "a") (lambda (s) 'error)) "ab")
+              'error)
+
 ; parse tests
 (check-expect (parse (emp) "") '())
 (check-error (parse (lit "a") "b") "bad input, got error")

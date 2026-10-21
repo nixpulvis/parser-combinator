@@ -52,13 +52,19 @@ A @Parser is a function that consumes a string and produces a @|Result|.
  A parser only ever matches a @emph{prefix} of its input. It is up to
  @racket[parse] to insist that a match covers the whole string.
 
-Parsers are plain functions. A parser can be applied directly to a
+Parsers are functions. A parser can be applied directly to a
  string:
 
 @examples[#:eval parse-eval
 ((lit "hi") "high")
 ((lit "hi") "bye")
 ]
+
+The parsers made by this library don't copy their input as they run.
+ They pass positions in the input to one another, so applying a parser
+ copies the input only once, to make the @racket[_remaining] string of
+ its @|Result|. A @Parser written as a plain function works with them
+ too. When one of them runs it, it gets a copy of the rest of the input.
 
 @defstruct*[result ([value #,Value] [remaining string?]) #:transparent]{
  represents a successful match, as produced by any @Parser that matches.
