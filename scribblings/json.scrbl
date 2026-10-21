@@ -32,18 +32,21 @@ A @JSON is one of:
  @item{@racket['null], for @tt{null}}
  @item{a @racket[(listof #,JSON)], for a JSON array, an ordered
  collection of values}
- @item{a @racket[(listof json-pair?)], for a JSON object, a collection of
- named values}
+ @item{an immutable @racket[(and/c hash-eq? (hash/c symbol? #,JSON))]
+ mapping each name in a JSON object to its value}
 ]
 
-Note that an empty JSON array and an empty JSON object are both
- represented as @racket['()].
+An empty JSON array is @racket['()] and an empty JSON object is
+ @racket[#hasheq()], so every kind of JSON value can be told apart with
+ @racket[list?], @racket[hash?], and the other predicates above. If a
+ name appears more than once in an object, the last value wins. The
+ order of the names in the text is not kept.
 
-@defstruct*[json-pair ([name string?] [value #,JSON]) #:transparent]{
- represents one named value in a JSON object, as produced by
- @racket[string->json] and @racket[PAIR] for each name and value in the
- object. The pairs of an object appear in the same order as in the
- text.}
+@examples[#:eval json-eval
+(define obj (string->json "{\"a\": [1, 2], \"b\": {}}"))
+(hash-ref obj 'a)
+(list-ref (hash-ref obj 'a) 1)
+]
 
 @defproc[(string->json [str string?]) #,JSON]{
  parses @racket[str] as a JSON value, ignoring whitespace around it. It
@@ -146,9 +149,8 @@ Wherever the grammar allows whitespace around a value or a punctuation
 
 @defthing[PAIR #,Parser]{
  matches one name and value in a JSON object, such as
- @tt{"name": true}, and produces a @racket[json-pair] of the name, as
- produced by @racket[STRING], and the value, as produced by
- @racket[VALUE].
+ @tt{"name": true}, and produces a pair of the name, as a symbol, and the
+ value, as produced by @racket[VALUE].
 
 @examples[#:eval json-eval
 (parse PAIR "\"a\": true")
@@ -156,8 +158,8 @@ Wherever the grammar allows whitespace around a value or a punctuation
 
 @defthing[OBJECT #,Parser]{
  matches a JSON object, that is, zero or more @racket[PAIR]s separated by
- commas and surrounded by braces. It produces the list of
- @racket[json-pair]s, in order.
+ commas and surrounded by braces. It produces an immutable
+ @racket[hasheq] from the name of each @racket[PAIR] to its value.
 
 @examples[#:eval json-eval
 (parse OBJECT "{}")

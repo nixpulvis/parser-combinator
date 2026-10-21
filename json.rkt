@@ -1,8 +1,7 @@
 #lang racket
 (require "parse.rkt")
 
-(provide (struct-out json-pair)
-         string->json
+(provide string->json
          SPACE
          HEXIT
          NONZERO-DIGIT
@@ -29,12 +28,9 @@
 ; A JSONArray is a [Listof JSON], representing an ordered
 ; collection of values.
 
-; A JSONObject is a [Listof JSONPair], representing a set
-; of named values, similar to a structure.
-
-; A JSONPair is a (make-json-pair String JSON),
-; representing a named value.
-(define-struct json-pair (name value) #:transparent)
+; A JSONObject is an immutable [HashEqof Symbol JSON], mapping each
+; name to its value. If a name appears more than once, the last value
+; wins. This is the shape Racket's `json` library uses for objects.
 
 ; -------------------------------------
 ; ----- JSON Context Free Grammar -----
@@ -106,16 +102,19 @@
 
 ; Parser
 (define-parser PAIR
-  (seq* (lambda (name colon value) (make-json-pair name value))
+  (seq* (lambda (name colon value) (cons (string->symbol name) value))
          STRING
          (spacey (lit ":"))
          VALUE))
 
 ; Parser
 (define-parser OBJECT
-  (unwrap (spacey (lit "{"))
-          (comma-separated PAIR)
-          (spacey (lit "}"))))
+  (seq* (lambda (open pairs close)
+          (for/hasheq ([pair (in-list pairs)])
+            (values (car pair) (cdr pair))))
+        (spacey (lit "{"))
+        (comma-separated PAIR)
+        (spacey (lit "}"))))
 
 ; Parser
 (define-parser ARRAY
