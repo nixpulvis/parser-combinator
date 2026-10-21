@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        racket-version: ['8.10', 'stable']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Bogdanp/setup-racket@v1.16
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: ${{ matrix.racket-version }}
+      - name: Install package
+        run: raco pkg install --auto --batch --link --name parser-combinator "$GITHUB_WORKSPACE"
+      - name: Check package dependencies
+        run: raco setup --check-pkg-deps --unused-pkg-deps --pkgs parser-combinator
+      - name: Run tests
+        # test-engine reports failures but always exits 0, so require each
+        # test file to print its "All N tests passed!" summary.
+        run: |
+          status=0
+          for f in *-tests.rkt; do
+            out=$(raco test "$f" 2>&1) || status=1
+            echo "$out"
+            echo "$out" | grep -Eq '^All [0-9]+ tests passed!' || status=1
+          done
+          exit $status
