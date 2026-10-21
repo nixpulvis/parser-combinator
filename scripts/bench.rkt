@@ -168,19 +168,36 @@
            #:make-name what-name)])
     (print-table results (> (length parsers) 1) racket?)
     (when plot
-      (parameterize ([plot-x-ticks no-ticks])
-        (plot-file (render-benchmark-alts (list (if racket? racket-json (car (first parsers))))
-                                          results
-                                          #:format-opts car
-                                          #:normalize? racket?)
-                   (car plot)
-                   (cdr plot)
-                   #:title "string->json"
-                   #:x-label #f
-                   #:y-label (if racket?
-                                 (format "time relative to ~a" racket-json)
-                                 "mean ms")
-                   #:width 1000))
+      ; Plotted on a log scale, so that a parser many times slower than
+      ; the others doesn't flatten their bars. A log scale can't reach 0,
+      ; where the bars start, so the axis starts at half the smallest bar.
+      (let* ([mean-of (lambda (r) (mean (benchmark-result-trial-times r)))]
+             [racket-means (for/hash ([r (in-list results)]
+                                      #:when (equal? (benchmark-result-opts r) (list racket-json)))
+                             (values (benchmark-result-name r) (mean-of r)))]
+             [bars (for/list ([r (in-list results)])
+                     (if racket?
+                         (/ (mean-of r) (hash-ref racket-means (benchmark-result-name r)))
+                         (mean-of r)))])
+        (parameterize ([plot-x-ticks no-ticks]
+                       [plot-y-transform log-transform]
+                       [plot-y-ticks (log-ticks)]
+                       ; Outside the plot, so it can't cover any bars.
+                       [plot-legend-anchor 'outside-right-top])
+          (plot-file (render-benchmark-alts (list (if racket? racket-json (car (first parsers))))
+                                            results
+                                            #:format-opts car
+                                            #:normalize? racket?)
+                     (car plot)
+                     (cdr plot)
+                     #:title "string->json"
+                     #:x-label #f
+                     #:y-label (if racket?
+                                   (format "time relative to ~a, log scale" racket-json)
+                                   "mean ms, log scale")
+                     #:y-min (/ (apply min bars) 2)
+                     #:y-max (* (apply max bars) 2)
+                     #:width 1200)))
       (printf "\nplot written to ~a\n" (car plot)))))
 
 ; [Listof benchmark-result] Boolean Boolean -> Void
