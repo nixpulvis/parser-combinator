@@ -1,15 +1,6 @@
 #lang racket
 
-; TODO:
-; - Allow `seq` to join AST nodes using "construction decorator" functions.
-; - Merge `wrap` and `unwrap` into one function, this will depend on
-;   work on passing AST construction decorators.
-
-(provide (struct-out emp-node)
-         (struct-out lit-node)
-         (struct-out wrap-node)
-         (struct-out seq-node)
-         define-parser
+(provide define-parser
          lit
          rx
          alt
@@ -20,12 +11,8 @@
          emp
          plus
          star
-         wrap
          unwrap
          parse
-         star-foldr
-         star-foldl
-         flatten-ast
          ; TODO: Remove this provide.
          (struct-out result))
 
@@ -33,20 +20,16 @@
 ; ----- Context Free Grammar Library -----
 ; ----------------------------------------
 
-; A AST is one of:
-; - #<emp-node>
-; - #<lit-node String>
-; - #<wrap-node Symbol AST>
-; - #<seq-node Symbol AST AST>
-(struct emp-node () #:transparent)
-(struct lit-node (value) #:transparent)
-(struct wrap-node (label value) #:transparent)
-(struct seq-node (label left right) #:transparent)
+; A Value is whatever a parser produces:
+; - `lit` and `rx` produce the matched String
+; - `emp`, and `opt` when its parser fails, produce '()
+; - `star` and `plus` produce the list of their parser's Values
+; - `seq` and `seq*` produce whatever their constructor returns
 
 ; A Result is one of:
 ; - 'error
-; - (result AST String)
-(struct result (node remaining) #:transparent)
+; - (result Value String)
+(struct result (value remaining) #:transparent)
 
 ; A Parser is a [String -> Result]
 
@@ -62,7 +45,7 @@
     (let ([len (string-length str)])
       (if (and (>= (string-length s) len)
                (string=? (substring s 0 len) str))
-          (result (lit-node str) (substring s len))
+          (result str (substring s len))
           'error))))
 
 ; Regexp -> Parser
@@ -75,7 +58,7 @@
     (lambda (s)
       (let ([m (regexp-match anchored s)])
         (if m
-            (result (lit-node (car m)) (substring s (string-length (car m))))
+            (result (car m) (substring s (string-length (car m))))
             'error)))))
 
 ; Parser Parser -> Parser
@@ -91,8 +74,18 @@
             parser
             (alt parser (apply alt* parsers))) s)))
 
-; Symbol Parser Parser -> Parser
-(define (seq label p1 p2)
+; Symbol Any Natural -> Void
+; Raises an error for `who` unless `build` is a constructor that accepts
+; `n` Values.
+(define (check-constructor who build n)
+  (unless (and (procedure? build) (procedure-arity-includes? build n))
+    (raise-argument-error who
+                          (format "(procedure-arity-includes/c ~a)" n)
+                          build)))
+
+; (Value Value -> Value) Parser Parser -> Parser
+(define (seq build p1 p2)
+  (check-constructor 'seq build 2)
   (lambda (s)
     (let ([r1 (p1 s)])
       (if (symbol? r1)
@@ -100,60 +93,49 @@
           (let ([r2 (p2 (result-remaining r1))])
             (if (symbol? r2)
                 'error
-                (result (seq-node label (result-node r1) (result-node r2))
+                (result (build (result-value r1) (result-value r2))
                         (result-remaining r2))))))))
 
-; Symbol Parser Parser ... -> Parser
-(define (seq* label parser . parsers)
-  (lambda (s)
-    ((if (empty? parsers)
-         parser
-         (seq label parser (apply seq* label parsers))) s)))
+; (Value ... -> Value) Parser Parser ... -> Parser
+; The constructor gets one Value per parser, collected into a list by
+; nesting `seq` with `cons`.
+(define (seq* build parser . parsers)
+  (check-constructor 'seq* build (add1 (length parsers)))
+  (seq (lambda (v vs) (apply build v vs))
+       parser
+       (foldr (lambda (p rest) (seq cons p rest))
+              (lambda (s) (result '() s))
+              parsers)))
 
 ; Parser -> Parser
 (define (opt parser)
   (lambda (s)
     (let ([r (parser s)])
-      (if (symbol? r) (result (emp-node) s) r))))
+      (if (symbol? r) (result '() s) r))))
 
 ; -> Parser
 (define (emp)
   (lambda (s)
-    (result (emp-node) s)))
+    (result '() s)))
 
 ; Parser -> Parser
 (define (plus parser)
   (lambda (s)
-    ((seq 'rep parser (star parser)) s)))
+    ((seq cons parser (star parser)) s)))
 
 ; Parser -> Parser
 (define (star parser)
   (lambda (s)
-    ((alt (seq 'rep parser (lambda (s) (if (string=? s "")
-                                          (result (emp-node) "")
+    ((alt (seq cons parser (lambda (s) (if (string=? s "")
+                                          (result '() "")
                                           ((star parser) s))))
          (emp)) s)))
 
-; Symbol Parser Parser Parser -> Parser
-(define (wrap label l b r)
-  (lambda (s)
-    (let ([r ((seq* 'wrap l b r) s)])
-      (if (symbol? r)
-           'error
-           (result (wrap-node label
-                             (seq-node-left (seq-node-right (result-node r))))
-                   (result-remaining r))))))
-
 ; Parser Parser Parser -> Parser
-(define (unwrap l b r)
-  (lambda (s)
-    (let ([r ((seq* 'wrap l b r) s)])
-      (if (symbol? r)
-           'error
-           (result (seq-node-left (seq-node-right (result-node r)))
-                   (result-remaining r))))))
+(define (unwrap left body right)
+  (seq* (lambda (l b r) b) left body right))
 
-; Parser String -> AST
+; Parser String -> Value
 (define (parse parser str)
   (let ([r (parser str)])
     (cond [(symbol? r)
@@ -161,27 +143,4 @@
           [(> (string-length (result-remaining r)) 0)
            (error "bad input, had leftover text" (result-remaining r))]
           [else
-           (result-node r)])))
-
-; (AST X -> X) X (seq Symbol AST AST) -> X
-(define (star-foldr op base ast)
-  (if (and (seq-node? ast)
-           (symbol=? (seq-node-label ast) 'rep))
-      (op (seq-node-left ast) (star-foldr op base (seq-node-right ast)))
-      base))
-
-; (AST X -> X) X (seq Symbol AST AST) -> X
-(define (star-foldl op base ast)
-  (if (and (seq-node? ast)
-           (symbol=? (seq-node-label ast) 'rep))
-      (star-foldl op (op (seq-node-left ast) base) (seq-node-right ast))
-      base))
-
-; AST -> String
-(define (flatten-ast ast)
-  (cond [(emp-node? ast) ""]
-        [(lit-node? ast) (lit-node-value ast)]
-        [(wrap-node? ast) (flatten-ast (wrap-node-value ast))]
-        [(seq-node? ast) (string-append (flatten-ast (seq-node-left ast))
-                                        (flatten-ast (seq-node-right ast)))]
-        [else (error "bad input: given" ast)]))
+           (result-value r)])))
