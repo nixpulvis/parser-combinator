@@ -12,6 +12,7 @@
          opt
          star
          plus
+         where
          unwrap
          parse)
 
@@ -27,6 +28,7 @@
 ; - `alt` and `alt*` produce the Value of the parser that matched
 ; - `opt` produces its parser's Value, or '() if its parser fails
 ; - `star` and `plus` produce the list of their parser's Values
+; - `where` produces its parser's Value, when its condition is met
 ; - `unwrap` produces the Value of its middle parser
 
 ; A Result is one of:
@@ -182,6 +184,14 @@
 ; Parser -> Parser
 (define (plus p)
   (seq cons p (star p)))
+
+; Parser [Value -> Any] -> Parser
+; Matches what `p` matches, but only when `ok?` accepts its Value.
+(define (where p ok?)
+  (parser
+   (lambda (s i)
+     (let ([m (run p s i)])
+       (if (and (matched? m) (ok? (matched-value m))) m 'error)))))
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)

@@ -111,6 +111,21 @@
 (check-expect ((opt (lit "-")) "")
               (result '() ""))
 
+; where tests
+(define NUMBER (seq* string->number (rx #px"\\d+")))
+(check-expect ((where NUMBER even?) "42!")
+              (result 42 "!"))
+(check-expect ((where NUMBER even?) "41!")
+              'error)
+(check-expect ((where NUMBER even?) "x")
+              'error)
+(check-expect ((seq list (lit "#") (where NUMBER even?)) "#42!")
+              (result (list "#" 42) "!"))
+(check-expect ((seq list (lit "#") (where NUMBER even?)) "#41!")
+              'error)
+(check-expect ((alt (where (lit "ab") (const #f)) (lit "a")) "abc")
+              (result "a" "bc"))
+
 ; emp tests
 (check-expect ((emp) "123")
               (result '() "123"))

@@ -31,6 +31,8 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  parser fails}
  @item{@racket[star] and @racket[plus] produce the list of their
  parser's @|Value|s}
+ @item{@racket[where] produces its parser's @|Value|, when its
+ condition is met}
  @item{@racket[unwrap] produces the @Value of its middle parser}
 ]
 The constructors are where a grammar builds the data the program needs,
@@ -241,6 +243,32 @@ The parsers made by this library don't copy their input as they run.
 @examples[#:eval parse-eval
 (parse (plus (lit "a")) "aa")
 (eval:error (parse (plus (lit "a")) ""))
+]}
+
+@defproc[(where [p #,Parser] [ok? (-> #,Value any/c)]) #,Parser]{
+ produces a @Parser that matches what @racket[p] matches, but only when
+ @racket[ok?] accepts its @|Value|. Otherwise it fails, as if
+ @racket[p] had not matched. The @Value is @racket[p]'s.
+
+@examples[#:eval parse-eval
+(define NUMBER (seq* string->number (rx #px"\\d+")))
+(define BYTE (where NUMBER byte?))
+(parse BYTE "200")
+(eval:error (parse BYTE "300"))
+]
+
+ It is the way to restrict a match by its @Value without writing a
+ @Parser as a plain function, which would be given a copy of the rest of
+ the input every time it runs. Written as a plain function,
+ @racket[where] would be:
+
+@examples[#:label #f #:eval parse-eval
+(define (plain-where p ok?)
+  (lambda (s)
+    (let ([r (p s)])
+      (if (and (result? r) (ok? (result-value r)))
+          r
+          'error))))
 ]}
 
 @defproc[(unwrap [left #,Parser] [body #,Parser] [right #,Parser]) #,Parser]{
