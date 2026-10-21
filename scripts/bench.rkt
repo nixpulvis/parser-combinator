@@ -4,12 +4,12 @@
 ; against Racket's own JSON parser, string->jsexpr, using the benchmark
 ; package.
 ;
-;   scripts/bench.rkt [--racket] [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
+;   scripts/bench.rkt [--racket] [--merge] [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree. With no refs, the working tree is
-; benchmarked. With --racket, times are also shown relative to
-; string->jsexpr's.
+; benchmarked. With --merge, so is a merge of each combination of the
+; refs. With --racket, times are also shown relative to string->jsexpr's.
 (require benchmark
          json
          math/statistics
@@ -57,31 +57,81 @@
            (let ([depth (quotient n 2)])
              (string-append (make-string depth #\[) (make-string depth #\])))))))
 
-; String ... -> Void
-; Runs git in this checkout.
-(define (git . args)
-  (unless (apply system* (find-executable-path "git") "-C" root args)
-    (raise-user-error 'bench "git ~a failed" (string-join args " "))))
+; Path-String String ... -> (values Boolean String)
+; Runs git in `dir`, returning whether it succeeded and everything it
+; printed.
+(define (git? dir . args)
+  (let* ([out (open-output-string)]
+         [ok? (parameterize ([current-output-port out]
+                             [current-error-port out])
+                (apply system* (find-executable-path "git") "-C" dir args))])
+    (values ok? (get-output-string out))))
 
-; [Listof String] [[Listof (cons String Path)] -> Any] -> Any
+; Path-String String ... -> String
+; Runs git in `dir`, returning what it printed, or raising a user error if
+; it fails.
+(define (git dir . args)
+  (let-values ([(ok? out) (apply git? dir args)])
+    (unless ok?
+      (raise-user-error 'bench "git ~a failed:\n~a" (string-join args " ") out))
+    out))
+
+; [Listof String] Boolean [[Listof (cons String Path)] -> Any] -> Any
 ; Calls `proc` with a label and a checkout directory for each ref, using
-; temporary worktrees that are removed afterwards. With no refs, the one
-; checkout is this working tree.
-(define (call-with-checkouts refs proc)
+; temporary worktrees that are removed afterwards. With `merge?`, each
+; combination of the refs is checked out instead, each ref on its own and
+; every merge of two or more of them. With no refs, the one checkout is
+; this working tree.
+(define (call-with-checkouts refs merge? proc)
   (if (empty? refs)
       (proc (list (cons "working tree" root)))
       (let ([tmp (make-temporary-directory "bench~a")])
         (dynamic-wind
          void
          (lambda ()
-           (proc (for/list ([ref (in-list refs)] [i (in-naturals)])
-                   (let ([dir (build-path tmp (number->string i))])
-                     (git "worktree" "add" "--quiet" "--detach" (path->string dir) ref)
-                     (cons ref dir)))))
+           (proc (make-checkouts tmp (if merge?
+                                         (for*/list ([k (in-range 1 (add1 (length refs)))]
+                                                     [c (in-list (combinations refs k))])
+                                           c)
+                                         (map list refs)))))
          (lambda ()
            (for ([dir (in-list (directory-list tmp #:build? #t))])
-             (git "worktree" "remove" "--force" (path->string dir)))
+             (git root "worktree" "remove" "--force" (path->string dir)))
            (delete-directory/files tmp))))))
+
+; Path [Listof [Listof String]] -> [Listof (cons String Path)]
+; Checks out each list of refs into a worktree in `tmp`, merging the rest
+; of the refs into the first, and labels it with the refs joined by "+".
+; Skips, with a note on stderr, any list that doesn't merge cleanly, and
+; any whose code is the same as an earlier one's, which would only time
+; the same code again.
+(define (make-checkouts tmp ref-lists)
+  (for/fold ([checkouts '()]
+             [labels-by-tree (hash)]
+             #:result (reverse checkouts))
+            ([refs (in-list ref-lists)]
+             [i (in-naturals)])
+    (let ([label (string-join refs "+")]
+          [dir (path->string (build-path tmp (number->string i)))])
+      (git root "worktree" "add" "--quiet" "--detach" dir (first refs))
+      (let* ([failure
+              (for/or ([ref (in-list (rest refs))])
+                ; The merge commits are thrown away with the worktree, so
+                ; they don't need the user's identity.
+                (let-values ([(ok? out) (git? dir "-c" "user.name=bench" "-c" "user.email=bench@localhost"
+                                              "merge" "--quiet" "--no-edit" ref)])
+                  (and (not ok?)
+                       (begin (git? dir "merge" "--abort")
+                              (format "merging ~a failed:\n~a" ref out)))))]
+             [tree (and (not failure) (string-trim (git dir "rev-parse" "HEAD^{tree}")))]
+             [same (and tree (hash-ref labels-by-tree tree #f))])
+        (cond [(or failure same)
+               (eprintf "skipping ~a: ~a\n" label (or failure (format "same code as ~a" same)))
+               (git root "worktree" "remove" "--force" dir)
+               (values checkouts labels-by-tree)]
+              [else
+               (values (cons (cons label (string->path dir)) checkouts)
+                       (hash-set labels-by-tree tree label))])))))
 
 ; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Plot #f) -> Void
 ; Benchmarks string->json from each checkout, and Racket's string->jsexpr
@@ -216,6 +266,7 @@
 
 (module+ main
   (define racket? #f)
+  (define merge? #f)
   (define trials 30)
   (define sizes '(4000 8000 16000))
   (define plot #f)
@@ -224,6 +275,8 @@
      #:once-each
      [("--racket") "Also benchmark Racket's own JSON parser, string->jsexpr, and compare against it"
                    (set! racket? #t)]
+     [("--merge") "Also benchmark a merge of each combination of the refs, skipping any that conflict"
+                  (set! merge? #t)]
      [("--trials") n "Times to run each benchmark (default 30)"
                    (set! trials (positive-integer "--trials" n))]
      [("--sizes") ns "Comma-separated input sizes in characters (default 4000,8000,16000)"
@@ -233,6 +286,8 @@
                  (set! plot (plot-target file))]
      #:args refs
      refs))
-  (call-with-checkouts refs
+  (when (and merge? (< (length refs) 2))
+    (raise-user-error 'bench "--merge needs at least two refs to merge"))
+  (call-with-checkouts refs merge?
                        (lambda (checkouts)
                          (bench checkouts racket? trials sizes plot))))
