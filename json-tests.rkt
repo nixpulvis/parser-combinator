@@ -45,15 +45,15 @@
 
 ; PAIR tests
 (check-expect (parse PAIR "\"\":\"\"")
-              (make-json-pair "" ""))
+              (cons '|| ""))
 (check-expect (parse PAIR "\"foo\":\"bar\"")
-              (make-json-pair "foo" "bar"))
+              (cons 'foo "bar"))
 (check-expect (parse PAIR "\"foo\":123")
-              (make-json-pair "foo" 123))
+              (cons 'foo 123))
 (check-expect (parse PAIR "\"foo\" : 123")
-              (make-json-pair "foo" 123))
+              (cons 'foo 123))
 (check-expect (parse PAIR "\"foo\" \t: 123")
-              (make-json-pair "foo" 123))
+              (cons 'foo 123))
 
 ; ARRAY tests
 (check-expect (parse ARRAY "[]")
@@ -77,21 +77,19 @@
 
 ; OBJECT tests
 (check-expect (parse OBJECT "{}")
-              empty)
+              (hasheq))
 (check-expect (parse OBJECT "{\"foo\":\"bar\"}")
-              (list (make-json-pair "foo" "bar")))
+              (hasheq 'foo "bar"))
 (check-expect (parse OBJECT "{\"a\":\"b\",\"c\":\"d\"}")
-              (list (make-json-pair "a" "b") (make-json-pair "c" "d")))
+              (hasheq 'a "b" 'c "d"))
 (check-expect (parse OBJECT "{\"a\":{\"b\":\"c\"}}")
-              (list (make-json-pair "a" (list (make-json-pair "b" "c")))))
+              (hasheq 'a (hasheq 'b "c")))
 (check-expect (parse OBJECT "{\"a\":1,\"b\":[],\"c\":{}}")
-              (list (make-json-pair "a" 1)
-                    (make-json-pair "b" empty)
-                    (make-json-pair "c" empty)))
+              (hasheq 'a 1 'b empty 'c (hasheq)))
 (check-expect (parse OBJECT "{\"a\" : 1, \"b\" : [], \"c\" : {}}")
-              (list (make-json-pair "a" 1)
-                    (make-json-pair "b" empty)
-                    (make-json-pair "c" empty)))
+              (hasheq 'a 1 'b empty 'c (hasheq)))
+(check-expect (parse OBJECT "{\"a\":1,\"b\":2,\"a\":3}")
+              (hasheq 'a 3 'b 2))
 (check-error (parse OBJECT "{\"a\":1,}"))
 
 ; VALUE tests
@@ -140,15 +138,15 @@
 (define json-number3  #e2.5e-2)
 (define json-array1  empty)
 (define json-array2  (list 1 2 3 4 5))
-(define json-array3  (list 1 "hi" false (list (make-json-pair "foo" 10))))
+(define json-array3  (list 1 "hi" false (hasheq 'foo 10)))
 (define json-array4  (list 1 2 3 4))
-(define json-array5  (list empty))
+(define json-array5  (list (hasheq)))
 (define json-array6  (list (list 1 2 3) (list 4 5 6)))
-(define json-object1 empty)
-(define json-object2 (list (make-json-pair "something" 10)))
-(define json-object3 (list (make-json-pair "foo" 1337) (make-json-pair "bar" "yo!")))
-(define json-object4 (list (make-json-pair "life" 42) (make-json-pair "death" 666)))
-(define json-object5 (list (make-json-pair "foo" (list (make-json-pair "bar" 1)))))
+(define json-object1 (hasheq))
+(define json-object2 (hasheq 'something 10))
+(define json-object3 (hasheq 'foo 1337 'bar "yo!"))
+(define json-object4 (hasheq 'life 42 'death 666))
+(define json-object5 (hasheq 'foo (hasheq 'bar 1)))
 (define json-value1  true)
 (define json-value2  false)
 (define json-value3  'null)
@@ -244,7 +242,7 @@ HERE
 HERE
 )) true)
 
-(check-expect (list? (string->json
+(check-expect (hash? (string->json
 #<<HERE
 {
     "JSON Test Pattern pass3": {

@@ -35,8 +35,10 @@ well.
 
 (string->json "[]")
 ;=> '()
+(string->json "{}")
+;=> '#hasheq()
 (string->json "[1, {\"foo\": false}, 2]")
-;=> (list 1 (list (json-pair "foo" #f)) 2)
+;=> '(1 #hasheq((foo . #f)) 2)
 ```
 
 ## Tests
