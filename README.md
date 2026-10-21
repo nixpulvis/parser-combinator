@@ -90,10 +90,10 @@ scripts/bench.rkt
 ```
 
 Name git refs to compare them instead, each checked out into a temporary
-worktree, for example to check a branch for regressions against `master`. Times
-are shown relative to the first ref. `--racket` also benchmarks Racket's own JSON
-parser, `string->jsexpr`, and shows times relative to it instead. `--plot` also
-writes a plot of the times. See `scripts/bench.rkt --help` for the other options.
+worktree, for example to check a branch for regressions against `master`.
+`--racket` also benchmarks Racket's own JSON parser, `string->jsexpr`, and shows
+each time relative to its. `--plot` also writes a plot of the times. See
+`scripts/bench.rkt --help` for the other options.
 
 ```sh
 scripts/bench.rkt --plot bench.png master my-branch

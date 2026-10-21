@@ -8,8 +8,8 @@
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree. With no refs, the working tree is
-; benchmarked. Times are compared against string->jsexpr with --racket,
-; and otherwise against the first ref.
+; benchmarked. With --racket, times are also shown relative to
+; string->jsexpr's.
 (require benchmark
          json
          math/statistics
@@ -84,17 +84,13 @@
 
 ; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Path-String #f) -> Void
 ; Benchmarks string->json from each checkout, and Racket's string->jsexpr
-; too if `racket?`. Times are compared against Racket's parser if it ran,
-; and otherwise against the first checkout's.
+; too if `racket?`, in which case times are also shown relative to it.
 (define (bench checkouts racket? trials sizes plot-file-name)
   (let* ([parsers
           (append (for/list ([c (in-list checkouts)])
                     (cons (car c)
                           (dynamic-require (build-path (cdr c) "json.rkt") 'string->json)))
                   (if racket? (list (cons racket-json string->jsexpr)) '()))]
-         ; Nothing to compare against when there is only one parser.
-         [baseline (and (> (length parsers) 1)
-                        (if racket? racket-json (car (first parsers))))]
          ; Inputs are made before timing starts. A What is (list case size),
          ; and names the input `inputs` maps it to.
          [whats (for*/list ([c (in-list cases)] [n (in-list sizes)])
@@ -119,50 +115,57 @@
            #:extract-time 'delta-time
            #:num-trials trials
            #:make-name what-name)])
-    (print-table results baseline)
+    (print-table results (> (length parsers) 1) racket?)
     (when plot-file-name
       (parameterize ([plot-x-ticks no-ticks])
-        (plot-file (render-benchmark-alts (list (or baseline (car (first parsers))))
+        (plot-file (render-benchmark-alts (list (if racket? racket-json (car (first parsers))))
                                           results
                                           #:format-opts car
-                                          #:normalize? (and baseline #t))
+                                          #:normalize? racket?)
                    plot-file-name
                    #:title "string->json"
                    #:x-label #f
-                   #:y-label (if baseline
-                                 (format "time relative to ~a" baseline)
+                   #:y-label (if racket?
+                                 (format "time relative to ~a" racket-json)
                                  "mean ms")
                    #:width 1000))
       (printf "\nplot written to ~a\n" plot-file-name))))
 
-; [Listof benchmark-result] (U String #f) -> Void
+; [Listof benchmark-result] Boolean Boolean -> Void
 ; Prints each result's mean and 95% confidence interval, computed as the
-; plots from render-benchmark-alts compute theirs, and, given a
-; `baseline` parser, its mean relative to that parser's on the same input.
-(define (print-table results baseline)
+; plots from render-benchmark-alts compute theirs. With `parsers?`, it
+; also names the parser of each result, and with `racket?`, it shows each
+; mean relative to Racket's JSON parser's on the same input.
+(define (print-table results parsers? racket?)
   (let* ([mean-of (lambda (r) (mean (benchmark-result-trial-times r)))]
-         [baseline-means (for/hash ([r (in-list results)]
-                                    #:when (equal? (benchmark-result-opts r) (list baseline)))
-                           (values (benchmark-result-name r) (mean-of r)))]
-         [rows
-          (cons
-           (append (list "input" "parser" "mean ms" "± ms")
-                   (if baseline (list (format "vs ~a" baseline)) '()))
-           (for/list ([r (in-list results)])
-             (let* ([times (benchmark-result-trial-times r)]
-                    [m (mean-of r)])
-               (append
-                (list (benchmark-result-name r)
-                      (car (benchmark-result-opts r))
-                      (~r m #:precision '(= 2))
-                      (~r (* 1.96 (/ (stddev times) (sqrt (length times))))
-                          #:precision '(= 2)))
-                (if baseline
-                    (let ([base (hash-ref baseline-means (benchmark-result-name r))])
-                      (list (if (zero? base)
-                                "-"
-                                (string-append (~r (/ m base) #:precision '(= 1)) "x"))))
-                    '())))))]
+         [racket-means (for/hash ([r (in-list results)]
+                                  #:when (equal? (benchmark-result-opts r) (list racket-json)))
+                         (values (benchmark-result-name r) (mean-of r)))]
+         ; Each column is (list header alignment [benchmark-result -> String]).
+         [columns
+          (append
+           (list (list "input" 'left benchmark-result-name))
+           (if parsers?
+               (list (list "parser" 'left (lambda (r) (car (benchmark-result-opts r)))))
+               '())
+           (list (list "mean ms" 'right (lambda (r) (~r (mean-of r) #:precision '(= 2))))
+                 (list "± ms" 'right
+                       (lambda (r)
+                         (let ([times (benchmark-result-trial-times r)])
+                           (~r (* 1.96 (/ (stddev times) (sqrt (length times))))
+                               #:precision '(= 2))))))
+           (if racket?
+               (list (list (format "vs ~a" racket-json) 'right
+                           (lambda (r)
+                             (let ([base (hash-ref racket-means (benchmark-result-name r))])
+                               (if (zero? base)
+                                   "-"
+                                   (string-append (~r (/ (mean-of r) base) #:precision '(= 1))
+                                                  "x"))))))
+               '()))]
+         [rows (cons (map car columns)
+                     (for/list ([r (in-list results)])
+                       (for/list ([c (in-list columns)]) ((caddr c) r))))]
          [widths (apply map (lambda cells (apply max (map string-length cells))) rows)])
     (newline)
     (for ([cells (in-list rows)])
@@ -170,7 +173,7 @@
        (string-join
         (for/list ([cell (in-list cells)]
                    [width (in-list widths)]
-                   [align (in-list '(left left right right right))])
+                   [align (in-list (map cadr columns))])
           (~a cell #:min-width width #:align align))
         "  ")))))
 
