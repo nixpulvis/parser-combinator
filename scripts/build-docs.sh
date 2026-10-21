@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Build the manual as a standalone site in _site/. The package must already be
-# installed, since the examples in the manual run against it.
+# Build the manual as a standalone site in _site/.
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
+
+# The examples in the manual require parser-combinator/..., so make this
+# checkout the parser-combinator collection, whatever its directory is named.
+# PLTCOLLECTS is searched before installed packages, so this wins over an
+# installed copy of the package.
+collects=$(mktemp -d)
+trap 'rm -rf "$collects"' EXIT
+ln -s "$PWD" "$collects/parser-combinator"
+export PLTCOLLECTS="$collects:"
 
 rm -rf _site
 

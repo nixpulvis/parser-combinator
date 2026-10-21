@@ -68,10 +68,8 @@ Racket distribution. On a minimal install, install them first.
 raco pkg install --auto --skip-installed scribble-lib racket-doc
 ```
 
-Build the manual into `_site/`. The manual requires `parser-combinator/...`, so
-put this checkout's parent directory on the collection path. This relies on the
-checkout directory being named `parser-combinator`.
+Build the manual into `_site/`.
 
 ```sh
-PLTCOLLECTS="$(dirname "$PWD"):" raco scribble --htmls --dest-name _site scribblings/parser-combinator.scrbl
+scripts/build-docs.sh
 ```

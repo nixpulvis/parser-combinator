@@ -31,11 +31,7 @@ jobs:
           variant: CS
           version: stable
 
-      # The build script renders the docs itself, so skip them here.
-      - run: raco pkg install --auto --batch --link --no-docs --name parser-combinator "$GITHUB_WORKSPACE"
-        if: github.event.action != 'closed'
-
-      - run: .github/scripts/build-docs.sh
+      - run: scripts/build-docs.sh
         if: github.event.action != 'closed'
 
       - uses: rossjrw/pr-preview-action@v1
