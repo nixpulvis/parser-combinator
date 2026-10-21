@@ -41,22 +41,6 @@ well.
 ;=> '(1 #hasheq((foo . #f)) 2)
 ```
 
-## Tests
-
-The tests require `compiler-lib` (provides `raco test`) and `htdp-lib` (provides
-`test-engine/racket-tests`). Both ship with the full Racket distribution. On a
-minimal install (e.g. Homebrew's `minimal-racket`), install them first.
-
-```sh
-raco pkg install --auto --skip-installed compiler-lib htdp-lib
-```
-
-Run all of the tests.
-
-```sh
-raco test *-tests.rkt
-```
-
 ## Docs
 
 Building the manual requires `scribble-lib` (provides `raco scribble`) and
@@ -71,6 +55,22 @@ Build the manual into `_site/`.
 
 ```sh
 scripts/build-docs.sh
+```
+
+## Tests
+
+The tests require `compiler-lib` (provides `raco test`) and `htdp-lib` (provides
+`test-engine/racket-tests`). Both ship with the full Racket distribution. On a
+minimal install (e.g. Homebrew's `minimal-racket`), install them first.
+
+```sh
+raco pkg install --auto --skip-installed compiler-lib htdp-lib
+```
+
+Run all of the tests.
+
+```sh
+raco test *-tests.rkt
 ```
 
 ## Benchmarks
