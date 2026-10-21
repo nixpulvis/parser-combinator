@@ -1,6 +1,7 @@
 #lang racket
 (require test-engine/racket-tests)
 (require "parse.rkt")
+(require (submod "parse.rkt" positions))
 
 ; define-parser tests
 (define builds 0)
@@ -173,6 +174,38 @@
               (result (list "ab" "cd") "d"))
 (check-expect ((seq list (lit "a") (lambda (s) 'error)) "ab")
               'error)
+
+; positions tests
+; Char-Predicate -> Parser
+; matches one character that `ok?` accepts
+(define (char-where ok?)
+  (parser
+   (lambda (s i)
+     (if (and (< i (string-length s)) (ok? (string-ref s i)))
+         (matched (string (string-ref s i)) (add1 i))
+         'error))))
+(check-expect ((char-where char-alphabetic?) "ab")
+              (result "a" "b"))
+(check-expect ((char-where char-alphabetic?) "1")
+              'error)
+(check-expect ((seq list (lit "1") (star (char-where char-alphabetic?))) "1ab2")
+              (result (list "1" (list "a" "b")) "2"))
+(check-expect (run (lit "b") "ab" 1)
+              (matched "b" 2))
+(check-expect (run (lit "b") "ab" 0)
+              'error)
+(check-expect (run (lambda (s) (result s (substring s 1))) "abc" 1)
+              (matched "bc" 2))
+; A parser made with `parser` is given the input itself, not a copy.
+(define seen #f)
+(define spy
+  (parser (lambda (s i)
+            (set! seen (cons s i))
+            (matched '() i))))
+(define spied "ab!")
+(check-expect (begin ((seq list (lit "ab") spy) spied)
+                     (and (eq? (car seen) spied) (cdr seen)))
+              2)
 
 ; parse tests
 (check-expect (parse (emp) "") '())

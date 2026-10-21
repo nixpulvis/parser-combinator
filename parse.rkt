@@ -31,48 +31,59 @@
 ; - `where` produces its parser's Value, when its condition is met
 ; - `unwrap` produces the Value of its middle parser
 
-; A Result is one of:
-; - 'error
-; - (result Value String)
-(struct result (value remaining) #:transparent)
+; Parsers that match from a position in their input, rather than from
+; the start of a copy of what's left of it. The combinators below are
+; made this way. A parser written with these works with them without
+; copying the input. Require them with
+; (require (submod parser-combinator/parse positions)).
+(module positions racket/base
+  (provide (struct-out result)
+           (struct-out matched)
+           (struct-out parser)
+           run)
 
-; A Parser is a [String -> Result]
+  ; A Result is one of:
+  ; - 'error
+  ; - (result Value String)
+  (struct result (value remaining) #:transparent)
 
-; A Match is one of:
-; - 'error
-; - (matched Value Natural)
-; where the Natural is the position in the input just after the match.
-(struct matched (value end))
+  ; A Parser is a [String -> Result]
 
-; A Run is a [String Natural -> Match]
-; that matches the String starting at the Natural position.
+  ; A Match is one of:
+  ; - 'error
+  ; - (matched Value Natural)
+  ; where the Natural is the position in the input just after the match.
+  (struct matched (value end) #:transparent)
 
-; The combinators call each other's Runs with positions, so the input
-; isn't copied while parsing.
-(struct parser (run)
-  #:property prop:procedure
-  ; String -> Result
-  ; Applying a `parser` to a String calls this with the `parser` itself as
-  ; `self`. It calls the Run from position 0, and copies the rest of the
-  ; input once, for the Result's `remaining`.
-  (lambda (self s)
-    (let ([m ((parser-run self) s 0)])
-      (if (symbol? m)
-          'error
-          (result (matched-value m) (substring s (matched-end m)))))))
+  ; A Run is a [String Natural -> Match]
+  ; that matches the String starting at the Natural position.
 
-; Parser String Natural -> Match
-; Runs any Parser from position `i` of `s`. A Parser that is a plain
-; function is applied to a copy of the rest of the input.
-(define (run p s i)
-  (if (parser? p)
-      ((parser-run p) s i)
-      (let ([r (p (substring s i))])
-        (if (symbol? r)
+  ; The combinators call each other's Runs with positions, so the input
+  ; isn't copied while parsing. Applying a `parser` to a String runs it
+  ; from position 0, and copies the rest of the input once, for the
+  ; Result's `remaining`.
+  (struct parser (run)
+    #:property prop:procedure
+    (lambda (self s)
+      (let ([m ((parser-run self) s 0)])
+        (if (symbol? m)
             'error
-            (matched (result-value r)
-                     (- (string-length s)
-                        (string-length (result-remaining r))))))))
+            (result (matched-value m) (substring s (matched-end m)))))))
+
+  ; Parser String Natural -> Match
+  ; Runs any Parser from position `i` of `s`. A Parser that is a plain
+  ; function is applied to a copy of the rest of the input.
+  (define (run p s i)
+    (if (parser? p)
+        ((parser-run p) s i)
+        (let ([r (p (substring s i))])
+          (if (symbol? r)
+              'error
+              (matched (result-value r)
+                       (- (string-length s)
+                          (string-length (result-remaining r)))))))))
+
+(require 'positions)
 
 ; Parser -> Parser : Transformation
 ; Makes things lazy. The body is built the first time the parser runs,
