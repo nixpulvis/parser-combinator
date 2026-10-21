@@ -45,9 +45,9 @@ raco pkg install parser-combinator
                                                  DIGIT+
                                                  (star DIGIT)))))
 
-; AST -> Number
-(define (parse-number ast)
-  (string->number (apply string-append "#e" (flatten ast))))
+; Value -> Number
+(define (parse-number v)
+  (string->number (apply string-append "#e" (flatten v))))
 
 ; String -> Number
 (define (parse str)

@@ -20,16 +20,16 @@
 ; ----- Context Free Grammar Library -----
 ; ----------------------------------------
 
-; An AST is whatever a parser produces:
+; A Value is whatever a parser produces:
 ; - `lit` and `rx` produce the matched String
 ; - `emp`, and `opt` when its parser fails, produce '()
-; - `star` and `plus` produce the list of their parser's ASTs
+; - `star` and `plus` produce the list of their parser's Values
 ; - `seq` and `seq*` produce whatever their constructor returns
 
 ; A Result is one of:
 ; - 'error
-; - (result AST String)
-(struct result (node remaining) #:transparent)
+; - (result Value String)
+(struct result (value remaining) #:transparent)
 
 ; A Parser is a [String -> Result]
 
@@ -76,14 +76,14 @@
 
 ; Symbol Any Natural -> Void
 ; Raises an error for `who` unless `build` is a constructor that accepts
-; `n` ASTs.
+; `n` Values.
 (define (check-constructor who build n)
   (unless (and (procedure? build) (procedure-arity-includes? build n))
     (raise-argument-error who
                           (format "(procedure-arity-includes/c ~a)" n)
                           build)))
 
-; (AST AST -> AST) Parser Parser -> Parser
+; (Value Value -> Value) Parser Parser -> Parser
 (define (seq build p1 p2)
   (check-constructor 'seq build 2)
   (lambda (s)
@@ -93,15 +93,15 @@
           (let ([r2 (p2 (result-remaining r1))])
             (if (symbol? r2)
                 'error
-                (result (build (result-node r1) (result-node r2))
+                (result (build (result-value r1) (result-value r2))
                         (result-remaining r2))))))))
 
-; (AST ... -> AST) Parser Parser ... -> Parser
-; The constructor gets one AST per parser, collected into a list by
+; (Value ... -> Value) Parser Parser ... -> Parser
+; The constructor gets one Value per parser, collected into a list by
 ; nesting `seq` with `cons`.
 (define (seq* build parser . parsers)
   (check-constructor 'seq* build (add1 (length parsers)))
-  (seq (lambda (ast asts) (apply build ast asts))
+  (seq (lambda (v vs) (apply build v vs))
        parser
        (foldr (lambda (p rest) (seq cons p rest))
               (lambda (s) (result '() s))
@@ -135,7 +135,7 @@
 (define (unwrap left body right)
   (seq* (lambda (l b r) b) left body right))
 
-; Parser String -> AST
+; Parser String -> Value
 (define (parse parser str)
   (let ([r (parser str)])
     (cond [(symbol? r)
@@ -143,4 +143,4 @@
           [(> (string-length (result-remaining r)) 0)
            (error "bad input, had leftover text" (result-remaining r))]
           [else
-           (result-node r)])))
+           (result-value r)])))
