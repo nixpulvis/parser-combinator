@@ -124,7 +124,7 @@
 
 ; TODO: Stop when `parser` matches without consuming input. Today a parser
 ; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
-; makes `star` loop forever.
+; makes `star` loop forever once it matches before the end of the input.
 ; Parser -> Parser
 (define (star parser)
   (lambda (s)

@@ -70,8 +70,8 @@ Note that an empty JSON array and an empty JSON object are both
 The grammar behind @racket[string->json] is made of the parsers below. A
  few small ones match single characters, and their @|Value|s are the
  matched characters as strings. Then there is one parser for each kind
- of JSON value, which uses @racket[seq*] constructors to produce the
- @JSON itself. These parsers are exported so that programs
+ of JSON value, which uses @racket[seq] and @racket[seq*] constructors
+ to produce the @JSON itself. These parsers are exported so that programs
  can use them directly.
 
 Wherever the grammar allows whitespace around a value or a punctuation

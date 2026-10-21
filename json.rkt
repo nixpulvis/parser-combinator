@@ -32,7 +32,7 @@
 ; A JSONObject is a [Listof JSONPair], representing a set
 ; of named values, similar to a structure.
 
-; A JSONPair is a (make-pair String JSON),
+; A JSONPair is a (make-json-pair String JSON),
 ; representing a named value.
 (define-struct json-pair (name value) #:transparent)
 

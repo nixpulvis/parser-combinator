@@ -9,7 +9,7 @@
 @(define Parser @tech{Parser})
 @(define Result @tech{Result})
 
-@title[#:tag "parse"]{Parsers and Combinator}
+@title[#:tag "parse"]{Parsers and Combinators}
 
 @defmodule[parser-combinator/parse]
 
@@ -58,10 +58,7 @@ Parsers are plain functions. A parser can be applied directly to a
 
 @defstruct*[result ([value #,Value] [remaining string?]) #:transparent]{
  represents a successful match, as produced by any @Parser that matches.
- See @|Result|.
-
- This structure is exported so that programs can write their own
- parsers.}
+ See @|Result|.}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "defining"]{Defining Parsers}
@@ -133,39 +130,7 @@ Parsers are plain functions. A parser can be applied directly to a
 ]}
 
 @; -----------------------------------------------------------------------------
-@section[#:tag "combinator"]{Combinator}
-
-@defproc[(alt [p1 #,Parser] [p2 #,Parser]) #,Parser]{
- produces a @Parser that tries @racket[p1] and, only if it fails,
- tries @racket[p2] on the same input.
-
-@examples[#:eval parse-eval
-((alt (lit "a") (lit "b")) "bc")
-((alt (lit "a") (lit "b")) "c")
-]
-
- The choice is @emph{ordered} and final: once @racket[p1] matches,
- @racket[alt] never goes back to try @racket[p2], even if the rest of
- the grammar then fails. When one alternative is a prefix of another,
- list the longer one first.
-
-@examples[#:eval parse-eval
-(eval:error
- (parse (seq list (alt (lit "a") (lit "ab")) (lit "c"))
-        "abc"))
-(parse (seq list (alt (lit "ab") (lit "a")) (lit "c"))
-       "abc")
-]}
-
-@defproc[(alt* [p #,Parser] ...+) #,Parser]{
- produces a @Parser that tries each @racket[p] in order and behaves like
- the first one that matches. It is the same as nesting @racket[alt] to
- the right, and with a single parser @racket[(alt* p)] is the same as
- @racket[p].
-
-@examples[#:eval parse-eval
-((alt* (lit "x") (lit "y") (lit "z")) "zebra")
-]}
+@section[#:tag "combinator"]{Combinators}
 
 @defproc[(seq [build (-> #,Value #,Value #,Value)]
               [p1 #,Parser]
@@ -207,6 +172,38 @@ Parsers are plain functions. A parser can be applied directly to a
  (seq* (lambda (a b) a) (lit "a") (lit "b") (lit "c")))
 ]}
 
+@defproc[(alt [p1 #,Parser] [p2 #,Parser]) #,Parser]{
+ produces a @Parser that tries @racket[p1] and, only if it fails,
+ tries @racket[p2] on the same input.
+
+@examples[#:eval parse-eval
+((alt (lit "a") (lit "b")) "bc")
+((alt (lit "a") (lit "b")) "c")
+]
+
+ The choice is @emph{ordered} and final: once @racket[p1] matches,
+ @racket[alt] never goes back to try @racket[p2], even if the rest of
+ the grammar then fails. When one alternative is a prefix of another,
+ list the longer one first.
+
+@examples[#:eval parse-eval
+(eval:error
+ (parse (seq list (alt (lit "a") (lit "ab")) (lit "c"))
+        "abc"))
+(parse (seq list (alt (lit "ab") (lit "a")) (lit "c"))
+       "abc")
+]}
+
+@defproc[(alt* [p #,Parser] ...+) #,Parser]{
+ produces a @Parser that tries each @racket[p] in order and behaves like
+ the first one that matches. It is the same as nesting @racket[alt] to
+ the right, and with a single parser @racket[(alt* p)] is the same as
+ @racket[p].
+
+@examples[#:eval parse-eval
+((alt* (lit "x") (lit "y") (lit "z")) "zebra")
+]}
+
 @defproc[(opt [p #,Parser]) #,Parser]{
  produces a @Parser that behaves like @racket[p] if @racket[p] matches,
  and otherwise succeeds without consuming input, producing
@@ -230,8 +227,8 @@ Parsers are plain functions. A parser can be applied directly to a
  Like @racket[alt], @racket[star] never gives back a match, so
  @racket[(seq list (star (lit "a")) (lit "a"))] matches nothing at
  all. A parser @racket[p] that can succeed without consuming input, such
- as @racket[(opt _q)], makes @racket[(star p)] loop forever on any input
- where @racket[p] matches the empty string.}
+ as @racket[(opt _q)], makes @racket[(star p)] loop forever once
+ @racket[p] matches the empty string before the end of the input.}
 
 @defproc[(plus [p #,Parser]) #,Parser]{
  produces a @Parser that matches @racket[p] one or more times. The @Value

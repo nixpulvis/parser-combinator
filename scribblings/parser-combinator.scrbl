@@ -8,7 +8,7 @@
 
 @author{Nathan Lilienthal}
 
-This package provides a small library of @emph{parser combinator}: functions
+This package provides a small library of @emph{parser combinators}: functions
 that consume parsers and produce new parsers. Each parser is an ordinary Racket
 function from a string to a result, so a grammar is written as a collection of
 plain definitions, one per non-terminal.
@@ -108,8 +108,8 @@ Input that is not in the grammar is an error:
 ]
 
 The source of @racketmodname[parser-combinator/json] skips the second
- step for a larger grammar: its parsers use @racket[seq*] constructors
- to build the data while they parse.
+ step for a larger grammar: its parsers use @racket[seq] and
+ @racket[seq*] constructors to build the data while they parse.
 
 @include-section["parse.scrbl"]
 @include-section["json.scrbl"]
