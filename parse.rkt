@@ -36,10 +36,14 @@
 ; A Parser is a [String -> Result]
 
 ; Parser -> Parser : Transformation
-; Makes things lazy.
+; Makes things lazy. The body is built the first time the parser runs,
+; rather than every time, so a grammar isn't rebuilt as it parses.
 (define-syntax-rule (define-parser name body)
-  (define (name s)
-    (body s)))
+  (define name
+    (let ([p #f])
+      (lambda (s)
+        (unless p (set! p body))
+        (p s)))))
 
 ; String -> Parser
 (define (lit str)

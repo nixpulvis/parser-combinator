@@ -2,6 +2,15 @@
 (require test-engine/racket-tests)
 (require "parse.rkt")
 
+; define-parser tests
+(define builds 0)
+(define-parser COUNTED
+  (begin (set! builds (add1 builds))
+         (lit "x")))
+(check-expect builds 0)
+(check-expect (list (COUNTED "xy") (COUNTED "x") (COUNTED "y") builds)
+              (list (result "x" "y") (result "x" "") 'error 1))
+
 ; lit tests
 (check-expect ((lit "-") "-1.35")
               (result "-" "1.35"))
