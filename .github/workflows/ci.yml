@@ -8,10 +8,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        racket-version: ['8.10', 'stable']
     steps:
       - uses: actions/checkout@v4
       - uses: Bogdanp/setup-racket@v1.16
@@ -19,7 +15,7 @@ jobs:
           architecture: x64
           distribution: full
           variant: CS
-          version: ${{ matrix.racket-version }}
+          version: stable
       - name: Install package
         run: raco pkg install --auto --batch --link --name parser-combinator "$GITHUB_WORKSPACE"
       - name: Check package dependencies
