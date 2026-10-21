@@ -57,10 +57,26 @@
 ; seq tests
 (check-expect ((seq 'a (lit "-") (lit "+")) "-+...")
               (result (seq-node 'a (lit-node "-") (lit-node "+")) "..."))
+(check-expect ((seq list (lit "-") (lit "+")) "-+...")
+              (result (list (lit-node "-") (lit-node "+")) "..."))
 (check-expect ((seq 'a (lit "-") (lit "+")) "+-...")
               'error)
+(check-expect ((seq 'a (lit "-") (lit "+")) "--...")
+              'error)
+(define (one a) a)
+(define (two a b) a)
+(check-error (seq one (lit "-") (lit "+"))
+             (string-append "seq: contract violation\n"
+                            "  expected: (or/c symbol? (procedure-arity-includes/c 2))\n"
+                            "  given: #<procedure:one>"))
+(check-error (seq "a" (lit "-") (lit "+"))
+             (string-append "seq: contract violation\n"
+                            "  expected: (or/c symbol? (procedure-arity-includes/c 2))\n"
+                            "  given: \"a\""))
 
 ; seq* tests
+(check-expect ((seq* 'a (lit "-")) "-+")
+              (result (lit-node "-") "+"))
 (check-expect ((seq* 'a (lit "-") (lit "+")) "-+...")
               (result (seq-node 'a (lit-node "-") (lit-node "+")) "..."))
 (check-expect ((seq* 'b (lit "-") (lit "+") (lit ".")) "-+...")
@@ -69,8 +85,26 @@
                                 (seq-node 'b
                                           (lit-node "+")
                                           (lit-node "."))) ".."))
+(check-expect ((seq* list (lit "-") (lit "+") (lit ".")) "-+...")
+              (result (list (lit-node "-") (lit-node "+") (lit-node ".")) ".."))
+(check-expect ((seq* list (lit "-")) "-+")
+              (result (list (lit-node "-")) "+"))
+(check-expect ((seq* (lambda (l m r) m) (lit "(") (lit "x") (lit ")")) "(x)!")
+              (result (lit-node "x") "!"))
 (check-expect ((seq* 'c (lit "-") (lit "+")) "+-...")
               'error)
+(check-expect ((seq* 'c (lit "-") (lit "+") (lit ".")) "-+-")
+              'error)
+(check-expect ((seq* list (lit "-") (lit "+") (lit ".")) "-+-")
+              'error)
+(check-error (seq* two (lit "-") (lit "+") (lit "."))
+             (string-append "seq*: contract violation\n"
+                            "  expected: (or/c symbol? (procedure-arity-includes/c 3))\n"
+                            "  given: #<procedure:two>"))
+(check-error (seq* "a" (lit "-") (lit "+"))
+             (string-append "seq*: contract violation\n"
+                            "  expected: (or/c symbol? (procedure-arity-includes/c 2))\n"
+                            "  given: \"a\""))
 
 ; opt tests
 (check-expect ((opt (lit "-")) "-123")
@@ -117,20 +151,6 @@
                                 (seq-node 'rep
                                           (lit-node "2")
                                           (emp-node))) ""))
-
-; wrap tests
-(check-expect ((wrap '+ (lit "+") (lit "!") (lit "+")) "+!+")
-              (result (wrap-node '+ (lit-node "!")) ""))
-(check-expect ((wrap '+ (lit "+") (lit "!") (lit "+")) "+!+++")
-              (result (wrap-node '+ (lit-node "!")) "++"))
-(check-expect ((wrap '+ (lit "+") (star (lit "!")) (lit "+")) "+!!+++")
-              (result (wrap-node '+ (seq-node 'rep
-                                              (lit-node "!")
-                                              (seq-node 'rep
-                                                        (lit-node "!")
-                                                        (emp-node)))) "++"))
-(check-expect ((wrap '+ (lit "+") (lit "!") (lit "+")) "+!-")
-              'error)
 
 ; unwrap tests
 (check-expect ((unwrap (lit "+") (lit "!") (lit "+")) "+!+")
@@ -194,8 +214,6 @@
               "")
 (check-expect (flatten-ast (parse (lit ".") "."))
               ".")
-(check-expect (flatten-ast (parse (wrap '+ (lit "+") (lit "!") (lit "+")) "+!+"))
-              "!")
 (check-expect (flatten-ast (parse (seq* 'ab (lit "a") (lit "b")) "ab"))
               "ab")
 

@@ -1,13 +1,7 @@
 #lang racket
 
-; TODO:
-; - Allow `seq` to join AST nodes using "construction decorator" functions.
-; - Merge `wrap` and `unwrap` into one function, this will depend on
-;   work on passing AST construction decorators.
-
 (provide (struct-out emp-node)
          (struct-out lit-node)
-         (struct-out wrap-node)
          (struct-out seq-node)
          define-parser
          lit
@@ -20,7 +14,6 @@
          emp
          plus
          star
-         wrap
          unwrap
          parse
          star-foldr
@@ -36,11 +29,10 @@
 ; A AST is one of:
 ; - #<emp-node>
 ; - #<lit-node String>
-; - #<wrap-node Symbol AST>
 ; - #<seq-node Symbol AST AST>
+; - any value that a `seq` or `seq*` constructor produces
 (struct emp-node () #:transparent)
 (struct lit-node (value) #:transparent)
-(struct wrap-node (label value) #:transparent)
 (struct seq-node (label left right) #:transparent)
 
 ; A Result is one of:
@@ -91,24 +83,47 @@
             parser
             (alt parser (apply alt* parsers))) s)))
 
-; Symbol Parser Parser -> Parser
-(define (seq label p1 p2)
-  (lambda (s)
-    (let ([r1 (p1 s)])
-      (if (symbol? r1)
-          'error
-          (let ([r2 (p2 (result-remaining r1))])
-            (if (symbol? r2)
-                'error
-                (result (seq-node label (result-node r1) (result-node r2))
-                        (result-remaining r2))))))))
+; Symbol Any Natural -> Void
+; Raises an error for `who` unless `build` is a label or a constructor
+; that accepts `n` ASTs.
+(define (check-label-or-constructor who build n)
+  (unless (or (symbol? build)
+              (and (procedure? build) (procedure-arity-includes? build n)))
+    (raise-argument-error who
+                          (format "(or/c symbol? (procedure-arity-includes/c ~a))" n)
+                          build)))
 
-; Symbol Parser Parser ... -> Parser
-(define (seq* label parser . parsers)
-  (lambda (s)
-    ((if (empty? parsers)
-         parser
-         (seq label parser (apply seq* label parsers))) s)))
+; [Symbol or (AST AST -> AST)] Parser Parser -> Parser
+(define (seq build p1 p2)
+  (check-label-or-constructor 'seq build 2)
+  (let ([build (if (symbol? build)
+                   (lambda (left right) (seq-node build left right))
+                   build)])
+    (lambda (s)
+      (let ([r1 (p1 s)])
+        (if (symbol? r1)
+            'error
+            (let ([r2 (p2 (result-remaining r1))])
+              (if (symbol? r2)
+                  'error
+                  (result (build (result-node r1) (result-node r2))
+                          (result-remaining r2)))))))))
+
+; [Symbol or (AST ... -> AST)] Parser Parser ... -> Parser
+; A label nests `seq` to the right. A constructor gets one AST per parser,
+; collected into a list by nesting `seq` with `cons`.
+(define (seq* build parser . parsers)
+  (check-label-or-constructor 'seq* build (add1 (length parsers)))
+  (if (symbol? build)
+      (lambda (s)
+        ((if (empty? parsers)
+             parser
+             (seq build parser (apply seq* build parsers))) s))
+      (seq (lambda (ast asts) (apply build ast asts))
+           parser
+           (foldr (lambda (p rest) (seq cons p rest))
+                  (lambda (s) (result '() s))
+                  parsers))))
 
 ; Parser -> Parser
 (define (opt parser)
@@ -134,24 +149,9 @@
                                           ((star parser) s))))
          (emp)) s)))
 
-; Symbol Parser Parser Parser -> Parser
-(define (wrap label l b r)
-  (lambda (s)
-    (let ([r ((seq* 'wrap l b r) s)])
-      (if (symbol? r)
-           'error
-           (result (wrap-node label
-                             (seq-node-left (seq-node-right (result-node r))))
-                   (result-remaining r))))))
-
 ; Parser Parser Parser -> Parser
-(define (unwrap l b r)
-  (lambda (s)
-    (let ([r ((seq* 'wrap l b r) s)])
-      (if (symbol? r)
-           'error
-           (result (seq-node-left (seq-node-right (result-node r)))
-                   (result-remaining r))))))
+(define (unwrap left body right)
+  (seq* (lambda (l b r) b) left body right))
 
 ; Parser String -> AST
 (define (parse parser str)
@@ -181,7 +181,6 @@
 (define (flatten-ast ast)
   (cond [(emp-node? ast) ""]
         [(lit-node? ast) (lit-node-value ast)]
-        [(wrap-node? ast) (flatten-ast (wrap-node-value ast))]
         [(seq-node? ast) (string-append (flatten-ast (seq-node-left ast))
                                         (flatten-ast (seq-node-right ast)))]
         [else (error "bad input: given" ast)]))
