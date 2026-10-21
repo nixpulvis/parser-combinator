@@ -13,7 +13,6 @@
          star
          unwrap
          parse
-         ; TODO: Remove this provide.
          (struct-out result))
 
 ; ----------------------------------------
@@ -22,9 +21,12 @@
 
 ; A Value is whatever a parser produces:
 ; - `lit` and `rx` produce the matched String
-; - `emp`, and `opt` when its parser fails, produce '()
-; - `star` and `plus` produce the list of their parser's Values
+; - `emp` produces '()
 ; - `seq` and `seq*` produce whatever their constructor returns
+; - `alt` and `alt*` produce the Value of the parser that matched
+; - `opt` produces its parser's Value, or '() if its parser fails
+; - `star` and `plus` produce the list of their parser's Values
+; - `unwrap` produces the Value of its middle parser
 
 ; A Result is one of:
 ; - 'error
@@ -123,6 +125,9 @@
   (lambda (s)
     ((seq cons parser (star parser)) s)))
 
+; TODO: Stop when `parser` matches without consuming input. Today a parser
+; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
+; makes `star` loop forever once it matches before the end of the input.
 ; Parser -> Parser
 (define (star parser)
   (lambda (s)
