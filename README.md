@@ -39,9 +39,6 @@ well.
 ;=> (list 1 (list (json-pair "foo" #f)) 2)
 ```
 
-
-
-
 ## Tests
 
 The tests require `compiler-lib` (provides `raco test`) and `htdp-lib` (provides
