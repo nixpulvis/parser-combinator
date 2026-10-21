@@ -4,7 +4,8 @@
 ; against Racket's own JSON parser, string->jsexpr, using the benchmark
 ; package.
 ;
-;   scripts/bench.rkt [--racket] [--merge] [--trials N] [--sizes N,...] [--plot FILE] [ref ...]
+;   scripts/bench.rkt [--racket] [--merge] [--trials N] [--sizes N,...]
+;                     [--plot FILE [--log-scale]] [ref ...]
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree. With no refs, the working tree is
@@ -133,10 +134,11 @@
                (values (cons (cons label (string->path dir)) checkouts)
                        (hash-set labels-by-tree tree label))])))))
 
-; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Plot #f) -> Void
+; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Plot #f) Boolean -> Void
 ; Benchmarks string->json from each checkout, and Racket's string->jsexpr
 ; too if `racket?`, in which case times are also shown relative to it.
-(define (bench checkouts racket? trials sizes plot)
+; With `log-scale?`, the plot's y-axis is a log scale.
+(define (bench checkouts racket? trials sizes plot log-scale?)
   (let* ([parsers
           (append (for/list ([c (in-list checkouts)])
                     (cons (car c)
@@ -168,9 +170,9 @@
            #:make-name what-name)])
     (print-table results (> (length parsers) 1) racket?)
     (when plot
-      ; Plotted on a log scale, so that a parser many times slower than
-      ; the others doesn't flatten their bars. A log scale can't reach 0,
-      ; where the bars start, so the axis starts at half the smallest bar.
+      ; A log scale keeps a parser many times slower than the others from
+      ; flattening their bars. It can't reach 0, where the bars start, so
+      ; it runs from half the smallest bar to twice the largest.
       (let* ([mean-of (lambda (r) (mean (benchmark-result-trial-times r)))]
              [racket-means (for/hash ([r (in-list results)]
                                       #:when (equal? (benchmark-result-opts r) (list racket-json)))
@@ -180,8 +182,8 @@
                          (/ (mean-of r) (hash-ref racket-means (benchmark-result-name r)))
                          (mean-of r)))])
         (parameterize ([plot-x-ticks no-ticks]
-                       [plot-y-transform log-transform]
-                       [plot-y-ticks (log-ticks)]
+                       [plot-y-transform (if log-scale? log-transform (plot-y-transform))]
+                       [plot-y-ticks (if log-scale? (log-ticks) (plot-y-ticks))]
                        ; Outside the plot, so it can't cover any bars.
                        [plot-legend-anchor 'outside-right-top])
           (plot-file (render-benchmark-alts (list (if racket? racket-json (car (first parsers))))
@@ -192,11 +194,13 @@
                      (cdr plot)
                      #:title "string->json"
                      #:x-label #f
-                     #:y-label (if racket?
-                                   (format "time relative to ~a, log scale" racket-json)
-                                   "mean ms, log scale")
-                     #:y-min (/ (apply min bars) 2)
-                     #:y-max (* (apply max bars) 2)
+                     #:y-label (string-append
+                                (if racket?
+                                    (format "time relative to ~a" racket-json)
+                                    "mean ms")
+                                (if log-scale? ", log scale" ""))
+                     #:y-min (and log-scale? (/ (apply min bars) 2))
+                     #:y-max (and log-scale? (* (apply max bars) 2))
                      #:width 1200)))
       (printf "\nplot written to ~a\n" (car plot)))))
 
@@ -287,6 +291,7 @@
   (define trials 30)
   (define sizes '(4000 8000 16000))
   (define plot #f)
+  (define log-scale? #f)
   (define refs
     (command-line
      #:once-each
@@ -301,10 +306,14 @@
                                 (positive-integer "--sizes" s)))]
      [("--plot") file "Also plot the times to file, such as a .png, .svg, or .pdf"
                  (set! plot (plot-target file))]
+     [("--log-scale") "Plot the times on a log scale, so a much slower parser doesn't flatten the rest"
+                      (set! log-scale? #t)]
      #:args refs
      refs))
   (when (and merge? (< (length refs) 2))
     (raise-user-error 'bench "--merge needs at least two refs to merge"))
+  (when (and log-scale? (not plot))
+    (raise-user-error 'bench "--log-scale needs --plot"))
   (call-with-checkouts refs merge?
                        (lambda (checkouts)
-                         (bench checkouts racket? trials sizes plot))))
+                         (bench checkouts racket? trials sizes plot log-scale?))))

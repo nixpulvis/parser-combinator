@@ -95,9 +95,9 @@ worktree, for example to check a branch for regressions against `master`.
 branches perform together before they're merged. Combinations that conflict, or
 that merge to the same code as one already benchmarked, are skipped. `--racket`
 also benchmarks Racket's own JSON parser, `string->jsexpr`, and shows each time
-relative to its. `--plot` also writes a plot of the times, on a log scale so a
-much slower ref doesn't flatten the others. See `scripts/bench.rkt --help` for
-the other options.
+relative to its. `--plot` also writes a plot of the times, and `--log-scale` puts
+it on a log scale, so a much slower ref doesn't flatten the others. See
+`scripts/bench.rkt --help` for the other options.
 
 ```sh
 scripts/bench.rkt --plot bench.png master my-branch
