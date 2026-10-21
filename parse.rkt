@@ -13,7 +13,6 @@
          star
          unwrap
          parse
-         ; TODO: Remove this provide.
          (struct-out result))
 
 ; ----------------------------------------
@@ -123,6 +122,9 @@
   (lambda (s)
     ((seq cons parser (star parser)) s)))
 
+; TODO: Stop when `parser` matches without consuming input. Today a parser
+; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
+; makes `star` loop forever.
 ; Parser -> Parser
 (define (star parser)
   (lambda (s)

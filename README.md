@@ -8,6 +8,25 @@ Simple Racket parser library, and default (tested) JSON implementation.
 raco pkg install parser-combinator
 ```
 
+## Parser Usage
+
+```racket
+#lang racket
+(require parser-combinator/parse)
+
+(define-parser GREETING
+  (seq list (lit "hello ") (alt (lit "world") (lit "racket"))))
+
+(parse GREETING "hello world")
+;=> '("hello " "world")
+(apply string-append (parse GREETING "hello racket"))
+;=> "hello racket"
+```
+
+The [Quick Start](https://nixpulvis.com/parser-combinator/quick.html) has a
+longer example. Otherwise, you can read the JSON parser's implementation as
+well.
+
 ## JSON Usage
 
 ```racket
@@ -20,44 +39,8 @@ raco pkg install parser-combinator
 ;=> (list 1 (list (json-pair "foo" #f)) 2)
 ```
 
-## Parser Usage
 
-```racket
-#lang racket
-(require parser-combinator/parse)
 
-(define-parser DIGIT+ (alt* (lit "0")
-                            (lit "1")
-                            (lit "2")
-                            (lit "3")
-                            (lit "4")
-                            (lit "5")
-                            (lit "6")
-                            (lit "7")
-                            (lit "8")
-                            (lit "9")))
-
-(define-parser DIGIT (alt* (lit "0") DIGIT+))
-
-(define-parser NUMBER (seq* list
-                           (opt (lit "-"))
-                           (alt* (lit "0") (seq* list
-                                                 DIGIT+
-                                                 (star DIGIT)))))
-
-; Value -> Number
-(define (parse-number v)
-  (string->number (apply string-append "#e" (flatten v))))
-
-; String -> Number
-(define (parse str)
-  (parse-number (parse NUMBER str)))
-
-(println (parse "0"))
-(println (parse "-0"))
-(println (parse "1"))
-(println (parse "140"))
-```
 
 ## Tests
 
@@ -72,5 +55,23 @@ raco pkg install --auto --skip-installed compiler-lib htdp-lib
 Run all of the tests.
 
 ```sh
-raco test *tests.rkt
+raco test *-tests.rkt
+```
+
+## Docs
+
+Building the manual requires `scribble-lib` (provides `raco scribble`) and
+`racket-doc` (the Racket docs the manual links into). Both ship with the full
+Racket distribution. On a minimal install, install them first.
+
+```sh
+raco pkg install --auto --skip-installed scribble-lib racket-doc
+```
+
+Build the manual into `_site/`. The manual requires `parser-combinator/...`, so
+put this checkout's parent directory on the collection path. This relies on the
+checkout directory being named `parser-combinator`.
+
+```sh
+PLTCOLLECTS="$(dirname "$PWD"):" raco scribble --htmls --dest-name _site scribblings/parser-combinator.scrbl
 ```

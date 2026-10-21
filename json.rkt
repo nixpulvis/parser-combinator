@@ -3,7 +3,10 @@
 
 (provide (struct-out json-pair)
          string->json
-         ; TODO: Remove these provides.
+         SPACE
+         HEXIT
+         NONZERO-DIGIT
+         DIGIT
          STRING
          NUMBER
          ARRAY
@@ -77,13 +80,13 @@
          (lit "\"")))
 
 ; Parser
-(define-parser DIGIT+
+(define-parser NONZERO-DIGIT
   (alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7")
          (lit "8") (lit "9")))
 
 ; Parser
 (define-parser DIGIT
-  (alt* (lit "0") DIGIT+))
+  (alt* (lit "0") NONZERO-DIGIT))
 
 ; Parser
 (define-parser NUMBER
@@ -94,7 +97,7 @@
                   (flatten (list sign integer fraction exponent)))))
          (opt (lit "-"))
          (alt* (lit "0") (seq* list
-                               DIGIT+
+                               NONZERO-DIGIT
                                (star DIGIT)))
          (opt (seq* list (lit ".") (plus DIGIT)))
          (opt (seq* list (alt* (lit "e") (lit "E"))

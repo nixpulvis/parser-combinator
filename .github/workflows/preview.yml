@@ -1,0 +1,46 @@
+# Publish the docs for each pull request to
+# https://nixpulvis.com/parser-combinator/pr-preview/pr-<number>/
+# and remove them again when the pull request is closed.
+name: Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency: preview-${{ github.ref }}
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: Bogdanp/setup-racket@v1.16
+        if: github.event.action != 'closed'
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+
+      # The build script renders the docs itself, so skip them here.
+      - run: raco pkg install --auto --batch --link --no-docs --name parser-combinator "$GITHUB_WORKSPACE"
+        if: github.event.action != 'closed'
+
+      - run: .github/scripts/build-docs.sh
+        if: github.event.action != 'closed'
+
+      - uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: _site
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          pages-base-url: nixpulvis.com/parser-combinator

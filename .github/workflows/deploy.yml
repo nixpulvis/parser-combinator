@@ -1,0 +1,42 @@
+# Build the docs from master and publish them to the root of the gh-pages
+# branch, which GitHub Pages serves (Settings > Pages > Deploy from a branch >
+# gh-pages).
+name: Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: Bogdanp/setup-racket@v1.16
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+
+      # The build script renders the docs itself, so skip them here.
+      - run: raco pkg install --auto --batch --link --no-docs --name parser-combinator "$GITHUB_WORKSPACE"
+
+      - run: .github/scripts/build-docs.sh
+
+      - uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: _site
+          branch: gh-pages
+          # Leave PR previews alone, and rebase instead of force-pushing so
+          # concurrent preview deploys aren't clobbered.
+          clean-exclude: pr-preview/
+          force: false
