@@ -39,7 +39,7 @@
 (define-parser STRING
   (wrap 'string
          (lit "\"")
-         (star (alt* (char-except "\\" "\"")
+         (star (alt* (rx #rx"[^\"\\\u0000-\u001F]")
                      (lit "\\\"")
                      (lit "\\\\")
                      (lit "\\/")
@@ -67,10 +67,10 @@
          (alt* (lit "0") (seq* 'significand
                                DIGIT+
                                (star DIGIT)))
-         (opt (seq* 'decimal (lit ".") (star DIGIT)))
+         (opt (seq* 'decimal (lit ".") (plus DIGIT)))
          (opt (seq* 'exponent (alt* (lit "e") (lit "E"))
                     (opt (alt* (lit "+") (lit "-")))
-                    (star DIGIT)))))
+                    (plus DIGIT)))))
 
 ; Parser
 (define-parser PAIR

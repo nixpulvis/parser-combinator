@@ -1,7 +1,6 @@
 #lang racket
 
 ; TODO:
-; - Remove `char-except` in place of something a bit more flexible.
 ; - Allow `seq` to join AST nodes using "construction decorator" functions.
 ; - Merge `wrap` and `unwrap` into one function, this will depend on
 ;   work on passing AST construction decorators.
@@ -12,7 +11,7 @@
          (struct-out seq-node)
          define-parser
          lit
-         char-except
+         rx
          alt
          alt*
          seq
@@ -66,13 +65,18 @@
           (result (lit-node str) (substring s len))
           'error))))
 
-; String ... -> Parser
-(define (char-except . chars)
-  (lambda (s)
-    (if (and (>= (string-length s) 1)
-             (not (member (substring s 0 1) chars)))
-        (result (lit-node (substring s 0 1)) (substring s 1 (string-length s)))
-        'error)))
+; Regexp -> Parser
+; Matches `pattern` at the start of the input.
+(define (rx pattern)
+  (unless (regexp? pattern)
+    (raise-argument-error 'rx "regexp?" pattern))
+  (let ([anchored ((if (pregexp? pattern) pregexp regexp)
+                   (string-append "^(?:" (object-name pattern) ")"))])
+    (lambda (s)
+      (let ([m (regexp-match anchored s)])
+        (if m
+            (result (lit-node (car m)) (substring s (string-length (car m))))
+            'error)))))
 
 ; Parser Parser -> Parser
 (define (alt p1 p2)

@@ -20,21 +20,17 @@
 (check-expect ((lit "high") "hippo")
               'error)
 
-; char-except tests
-(check-expect ((char-except "a") "b")
-              (result (lit-node "b") ""))
-(check-expect ((char-except "a") "a")
+; rx tests
+(check-expect ((rx #rx"[a-c]+") "abcd")
+              (result (lit-node "abc") "d"))
+(check-expect ((rx #rx"[a-c]+") "dabc")
               'error)
-(check-expect ((char-except "a" "b") "a")
+(check-expect ((rx #rx"a|b") "xb")
               'error)
-(check-expect ((char-except "a" "b") "b")
+(check-expect ((rx #px"\\d+") "42x")
+              (result (lit-node "42") "x"))
+(check-expect ((rx #rx"a") "")
               'error)
-(check-expect ((char-except "a" "b") "b")
-              'error)
-(check-expect ((star (char-except "a" "b" "c")) "def")
-              (result (seq-node 'rep (lit-node "d") (seq-node 'rep (lit-node "e") (seq-node 'rep (lit-node "f") (emp-node)))) ""))
-(check-expect ((star (char-except "a" "b" "c")) "adc")
-              (result (emp-node) "adc"))
 
 ; alt tests
 (check-expect ((alt (lit "+") (lit "-")) "+123")
