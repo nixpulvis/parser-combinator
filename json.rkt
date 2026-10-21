@@ -50,10 +50,10 @@
 ; Matches zero or more `p`s separated by commas, producing the list of
 ; their values.
 (define (comma-separated p)
-  (alt (seq (lambda (x xs) (cons x (star-foldr cons empty xs)))
+  (alt (seq cons
             p
             (star (seq (lambda (comma x) x) (spacey (lit ",")) p)))
-       (seq* (const empty) (emp))))
+       (emp)))
 
 ; Parser
 (define-parser HEXIT
@@ -73,7 +73,7 @@
                      (lit "\\n")
                      (lit "\\r")
                      (lit "\\t")
-                     (seq* 'hex (lit "\\u") HEXIT HEXIT HEXIT HEXIT)))
+                     (seq* list (lit "\\u") HEXIT HEXIT HEXIT HEXIT)))
          (lit "\"")))
 
 ; Parser
@@ -94,11 +94,11 @@
                                          (flatten-ast fraction)
                                          (flatten-ast exponent))))
          (opt (lit "-"))
-         (alt* (lit "0") (seq* 'significand
+         (alt* (lit "0") (seq* list
                                DIGIT+
                                (star DIGIT)))
-         (opt (seq* 'decimal (lit ".") (plus DIGIT)))
-         (opt (seq* 'exponent (alt* (lit "e") (lit "E"))
+         (opt (seq* list (lit ".") (plus DIGIT)))
+         (opt (seq* list (alt* (lit "e") (lit "E"))
                     (opt (alt* (lit "+") (lit "-")))
                     (plus DIGIT)))))
 

@@ -39,13 +39,13 @@ raco pkg install parser-combinator
 
 (define-parser DIGIT (alt* (lit "0") DIGIT+))
 
-(define-parser NUMBER (seq* 'number
+(define-parser NUMBER (seq* list
                            (opt (lit "-"))
-                           (alt* (lit "0") (seq* 'significand
+                           (alt* (lit "0") (seq* list
                                                  DIGIT+
                                                  (star DIGIT)))))
 
-; (seq-node 'number AST AST) -> Number
+; AST -> Number
 (define (parse-number ast)
   (string->number (string-append "#e" (flatten-ast ast))))
 
