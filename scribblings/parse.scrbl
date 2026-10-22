@@ -24,7 +24,7 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  @item{@racket[lit] and @racket[rx] produce the matched text, a string}
  @item{@racket[emp] produces @racket['()]}
  @item{@racket[seq] and @racket[seq*] produce whatever their
- constructor returns}
+ constructor returns, given their parsers' @|Value|s}
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
  that matched}
  @item{@racket[opt] produces its parser's @Value, or @racket['()] if its
