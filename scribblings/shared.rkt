@@ -7,6 +7,7 @@
 
 (provide (all-from-out scribble/example)
          parse-eval
+         positions-eval
          quick-eval
          json-eval)
 
@@ -27,5 +28,8 @@
   ev)
 
 (define parse-eval (make-doc-eval 'parser-combinator/parse))
+(define positions-eval
+  (make-doc-eval 'parser-combinator/parse
+                 '(submod parser-combinator/parse positions)))
 (define quick-eval (make-doc-eval))
 (define json-eval (make-doc-eval 'parser-combinator/parse 'parser-combinator/json))

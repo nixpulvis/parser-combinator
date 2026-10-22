@@ -1,39 +1,100 @@
 #lang racket
 
-(provide define-parser
+(provide parse
+         (struct-out result)
+         define-parser
+         emp
          lit
          rx
-         alt
-         alt*
          seq
          seq*
+         alt
+         alt*
          opt
-         emp
-         plus
          star
-         unwrap
-         parse
-         (struct-out result))
+         plus
+         where
+         unwrap)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
 ; ----------------------------------------
 
 ; A Value is whatever a parser produces:
-; - `lit` and `rx` produce the matched String
 ; - `emp` produces '()
-; - `seq` and `seq*` produce whatever their constructor returns
+; - `lit` and `rx` produce the matched String
+; - `seq` and `seq*` produce whatever their constructor returns,
+;   given their parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
 ; - `opt` produces its parser's Value, or '() if its parser fails
 ; - `star` and `plus` produce the list of their parser's Values
+; - `where` produces its parser's Value, when its condition is met
 ; - `unwrap` produces the Value of its middle parser
 
-; A Result is one of:
-; - 'error
-; - (result Value String)
-(struct result (value remaining) #:transparent)
+; Parsers that match from a position in their input, rather than from
+; the start of a copy of what's left of it. The combinators below are
+; made this way. A parser written with these works with them without
+; copying the input. Require them with
+; (require (submod parser-combinator/parse positions)).
+(module positions racket/base
+  (provide (struct-out result)
+           (struct-out matched)
+           (struct-out parser)
+           run)
 
-; A Parser is a [String -> Result]
+  ; A Result is one of:
+  ; - 'error
+  ; - (result Value String)
+  (struct result (value remaining) #:transparent)
+
+  ; A Parser is a [String -> Result]
+
+  ; A Match is one of:
+  ; - 'error
+  ; - (matched Value Natural)
+  ; where the Natural is the position in the input just after the match.
+  (struct matched (value end) #:transparent)
+
+  ; A Run is a [String Natural -> Match]
+  ; that matches the String starting at the Natural position.
+
+  ; The combinators call each other's Runs with positions, so the input
+  ; isn't copied while parsing. Applying a `parser` to a String runs it
+  ; from position 0, and copies the rest of the input once, for the
+  ; Result's `remaining`.
+  (struct parser (run)
+    #:property prop:procedure
+    (lambda (self s)
+      (let ([m ((parser-run self) s 0)])
+        (if (symbol? m)
+            'error
+            (result (matched-value m) (substring s (matched-end m)))))))
+
+  ; Parser String Natural -> Match
+  ; Runs any Parser from position `i` of `s`. A Parser that is a plain
+  ; function is applied to a copy of the rest of the input.
+  (define (run p s i)
+    (if (parser? p)
+        ((parser-run p) s i)
+        (let ([r (p (substring s i))])
+          (if (symbol? r)
+              'error
+              (matched (result-value r)
+                       (- (string-length s)
+                          (string-length (result-remaining r)))))))))
+
+(require 'positions)
+
+; Parser String -> Value
+(define (parse p str)
+  (let ([m (run p str 0)])
+    (cond [(symbol? m)
+           (error "bad input, got error")]
+          [(< (matched-end m) (string-length str))
+           (error "bad input, had leftover text"
+                  (substring str (matched-end m)))]
+          [else
+           (matched-value m)])))
 
 ; Parser -> Parser : Transformation
 ; Makes things lazy. The body is built the first time the parser runs,
@@ -41,18 +102,27 @@
 (define-syntax-rule (define-parser name body)
   (define name
     (let ([p #f])
-      (lambda (s)
-        (unless p (set! p body))
-        (p s)))))
+      (parser (lambda (s i)
+                (unless p (set! p body))
+                (run p s i))))))
+
+; -> Parser
+(define (emp)
+  (parser
+   (lambda (s i)
+     (matched '() i))))
 
 ; String -> Parser
 (define (lit str)
-  (lambda (s)
-    (let ([len (string-length str)])
-      (if (and (>= (string-length s) len)
-               (string=? (substring s 0 len) str))
-          (result str (substring s len))
-          'error))))
+  (let ([len (string-length str)])
+    (parser
+     (lambda (s i)
+       (if (and (<= (+ i len) (string-length s))
+                (for/and ([c (in-string str)]
+                          [d (in-string s i)])
+                  (char=? c d)))
+           (matched str (+ i len))
+           'error)))))
 
 ; Regexp -> Parser
 ; Matches `pattern` at the start of the input.
@@ -61,24 +131,12 @@
     (raise-argument-error 'rx "regexp?" pattern))
   (let ([anchored ((if (pregexp? pattern) pregexp regexp)
                    (string-append "^(?:" (object-name pattern) ")"))])
-    (lambda (s)
-      (let ([m (regexp-match anchored s)])
-        (if m
-            (result (car m) (substring s (string-length (car m))))
-            'error)))))
-
-; Parser Parser -> Parser
-(define (alt p1 p2)
-  (lambda (s)
-    (let ([r1 (p1 s)])
-      (if (symbol? r1) (p2 s) r1))))
-
-; Parser Parser ... -> Parser
-(define (alt* parser . parsers)
-  (lambda (s)
-    ((if (empty? parsers)
-            parser
-            (alt parser (apply alt* parsers))) s)))
+    (parser
+     (lambda (s i)
+       (let ([m (regexp-match-positions anchored s i)])
+         (if m
+             (matched (substring s i (cdar m)) (cdar m))
+             'error))))))
 
 ; Symbol Any Natural -> Void
 ; Raises an error for `who` unless `build` is a constructor that accepts
@@ -92,64 +150,71 @@
 ; (Value Value -> Value) Parser Parser -> Parser
 (define (seq build p1 p2)
   (check-constructor 'seq build 2)
-  (lambda (s)
-    (let ([r1 (p1 s)])
-      (if (symbol? r1)
-          'error
-          (let ([r2 (p2 (result-remaining r1))])
-            (if (symbol? r2)
-                'error
-                (result (build (result-value r1) (result-value r2))
-                        (result-remaining r2))))))))
+  (parser
+   (lambda (s i)
+     (let ([m1 (run p1 s i)])
+       (if (symbol? m1)
+           'error
+           (let ([m2 (run p2 s (matched-end m1))])
+             (if (symbol? m2)
+                 'error
+                 (matched (build (matched-value m1) (matched-value m2))
+                          (matched-end m2)))))))))
 
 ; (Value ... -> Value) Parser Parser ... -> Parser
 ; The constructor gets one Value per parser, collected into a list by
 ; nesting `seq` with `cons`.
-(define (seq* build parser . parsers)
-  (check-constructor 'seq* build (add1 (length parsers)))
+(define (seq* build p . ps)
+  (check-constructor 'seq* build (add1 (length ps)))
   (seq (lambda (v vs) (apply build v vs))
-       parser
+       p
        (foldr (lambda (p rest) (seq cons p rest))
-              (lambda (s) (result '() s))
-              parsers)))
+              (emp)
+              ps)))
+
+; Parser Parser -> Parser
+(define (alt p1 p2)
+  (parser
+   (lambda (s i)
+     (let ([m1 (run p1 s i)])
+       (if (symbol? m1) (run p2 s i) m1)))))
+
+; Parser Parser ... -> Parser
+(define (alt* p . ps)
+  (if (empty? ps)
+      p
+      (alt p (apply alt* ps))))
 
 ; Parser -> Parser
-(define (opt parser)
-  (lambda (s)
-    (let ([r (parser s)])
-      (if (symbol? r) (result '() s) r))))
+(define (opt p)
+  (alt p (emp)))
 
-; -> Parser
-(define (emp)
-  (lambda (s)
-    (result '() s)))
-
-; Parser -> Parser
-(define (plus parser)
-  (lambda (s)
-    ((seq cons parser (star parser)) s)))
-
-; TODO: Stop when `parser` matches without consuming input. Today a parser
+; TODO: Stop when `p` matches without consuming input. Today a parser
 ; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
 ; makes `star` loop forever once it matches before the end of the input.
 ; Parser -> Parser
-(define (star parser)
-  (lambda (s)
-    ((alt (seq cons parser (lambda (s) (if (string=? s "")
-                                          (result '() "")
-                                          ((star parser) s))))
-         (emp)) s)))
+(define (star p)
+  (parser
+   (lambda (s i)
+     (run (alt (seq cons p (parser (lambda (s i)
+                                     (if (= i (string-length s))
+                                         (matched '() i)
+                                         (run (star p) s i)))))
+               (emp))
+          s i))))
+
+; Parser -> Parser
+(define (plus p)
+  (seq cons p (star p)))
+
+; Parser [Value -> Any] -> Parser
+; Matches what `p` matches, but only when `ok?` accepts its Value.
+(define (where p ok?)
+  (parser
+   (lambda (s i)
+     (let ([m (run p s i)])
+       (if (and (matched? m) (ok? (matched-value m))) m 'error)))))
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
   (seq* (lambda (l b r) b) left body right))
-
-; Parser String -> Value
-(define (parse parser str)
-  (let ([r (parser str)])
-    (cond [(symbol? r)
-           (error "bad input, got error")]
-          [(> (string-length (result-remaining r)) 0)
-           (error "bad input, had leftover text" (result-remaining r))]
-          [else
-           (result-value r)])))

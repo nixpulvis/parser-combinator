@@ -9,9 +9,9 @@
 @author{Nathan Lilienthal}
 
 This package provides a small library of @emph{parser combinators}: functions
-that consume parsers and produce new parsers. Each parser is an ordinary Racket
-function from a string to a result, so a grammar is written as a collection of
-plain definitions, one per non-terminal.
+that consume parsers and produce new parsers. Each parser is a Racket function
+from a string to a result, so a grammar is written as a collection of plain
+definitions, one per non-terminal.
 
 The package comes with two libraries:
 @itemlist[
