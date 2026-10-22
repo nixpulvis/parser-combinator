@@ -13,3 +13,4 @@
 (define pkg-desc "Parser combinators and a JSON parser.")
 (define version "1.0.1")
 (define pkg-authors '(nixpulvis))
+(define license 'MIT)
