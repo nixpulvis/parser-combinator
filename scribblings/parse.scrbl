@@ -15,6 +15,19 @@
 @defmodule[parser-combinator/parse #:packages ("parser-combinator")
            #:use-sources ((submod parser-combinator/parse positions))]
 
+@defproc[(parse [p #,Parser] [str string?]) #,Value]{
+ applies @Parser @racket[p] to @racket[str] and produces the resulting
+ @|Value|.
+ Unlike applying @racket[p] directly, @racket[parse] demands that
+ @racket[p] consume all of @racket[str]. It raises
+ @racket[exn:fail] if @racket[p] fails or leaves text over.
+
+@examples[#:eval parse-eval
+(parse (lit "hi") "hi")
+(eval:error (parse (lit "hi") "bye"))
+(eval:error (parse (lit "hi") "high"))
+]}
+
 @; -----------------------------------------------------------------------------
 @section[#:tag "data"]{Data Definitions}
 
@@ -282,21 +295,6 @@ The parsers made by this library pass positions in the input to one
 @examples[#:eval parse-eval
 (define SPACES (star (lit " ")))
 (parse (unwrap SPACES (lit "x") SPACES) "  x ")
-]}
-
-@; -----------------------------------------------------------------------------
-@section[#:tag "running"]{Running Parsers}
-
-@defproc[(parse [p #,Parser] [str string?]) #,Value]{
- applies @racket[p] to @racket[str] and produces the resulting @|Value|.
- Unlike applying @racket[p] directly, @racket[parse] demands that
- @racket[p] consume all of @racket[str]. It raises
- @racket[exn:fail] if @racket[p] fails or leaves text over.
-
-@examples[#:eval parse-eval
-(parse (lit "hi") "hi")
-(eval:error (parse (lit "hi") "bye"))
-(eval:error (parse (lit "hi") "high"))
 ]}
 
 @; -----------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 #lang racket
 
-(provide (struct-out result)
+(provide parse
+         (struct-out result)
          define-parser
          emp
          lit
@@ -13,8 +14,7 @@
          star
          plus
          where
-         unwrap
-         parse)
+         unwrap)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
@@ -84,6 +84,17 @@
                           (string-length (result-remaining r)))))))))
 
 (require 'positions)
+
+; Parser String -> Value
+(define (parse p str)
+  (let ([m (run p str 0)])
+    (cond [(symbol? m)
+           (error "bad input, got error")]
+          [(< (matched-end m) (string-length str))
+           (error "bad input, had leftover text"
+                  (substring str (matched-end m)))]
+          [else
+           (matched-value m)])))
 
 ; Parser -> Parser : Transformation
 ; Makes things lazy. The body is built the first time the parser runs,
@@ -207,14 +218,3 @@
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
   (seq* (lambda (l b r) b) left body right))
-
-; Parser String -> Value
-(define (parse p str)
-  (let ([m (run p str 0)])
-    (cond [(symbol? m)
-           (error "bad input, got error")]
-          [(< (matched-end m) (string-length str))
-           (error "bad input, had leftover text"
-                  (substring str (matched-end m)))]
-          [else
-           (matched-value m)])))
