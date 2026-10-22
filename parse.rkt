@@ -208,15 +208,15 @@
 ; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
 ; makes `star` loop forever once it matches before the end of the input.
 ; Parser -> Parser
+; The parser is built once, and refers to itself for each further match,
+; rather than being built again for every match.
 (define (star p)
-  (parser
-   (lambda (s i)
-     (run (alt (seq cons p (parser (lambda (s i)
-                                     (if (= i (string-length s))
-                                         (matched '() i)
-                                         (run (star p) s i)))))
-               (emp))
-          s i))))
+  (letrec ([self (alt (seq cons p (parser (lambda (s i)
+                                            (if (= i (string-length s))
+                                                (matched '() i)
+                                                (run self s i)))))
+                      (emp))])
+    self))
 
 ; Parser -> Parser
 (define (plus p)
