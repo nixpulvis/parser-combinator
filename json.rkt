@@ -39,17 +39,18 @@
 ; -------------------------------------
 
 ; Parser
+; The first character of a value says what kind it is, so `switch`
+; runs only that kind's parser, rather than each being tried in turn.
 (define-parser VALUE
-  (spacey (alt* STRING
-                OBJECT
-                ARRAY
-                (seq* (const true) (lit "true"))
-                (seq* (const false) (lit "false"))
-                (seq* (const 'null) (lit "null"))
-                NUMBER)))
+  (spacey (switch [(#\n) (seq* (const 'null) (lit "null"))]
+                  [(#\t) (seq* (const true) (lit "true"))]
+                  [(#\f) (seq* (const false) (lit "false"))]
+                  [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
+                  [(#\") STRING]
+                  [(#\[) ARRAY]
+                  [(#\{) OBJECT])))
 
 ; Parser
-; VALUE tries it last, so that other values don't each fail it first.
 (define-parser NUMBER
   (seq* (lambda parts
           (string->number (apply string-append "#e" (flatten parts))))
