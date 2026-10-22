@@ -195,11 +195,17 @@
   ; A log scale keeps a parser many times slower than the others from
   ; flattening their bars. It can't reach 0, where the bars start, so it
   ; runs from half the smallest bar to twice the largest.
-  (let ([bars (filter-map (if baseline (relative-to results baseline) mean-time)
-                          results)])
+  (let* ([bars (filter-map (if baseline (relative-to results baseline) mean-time)
+                           results)]
+         [y-min (and log-scale? (/ (apply min bars) 2))]
+         [y-max (and log-scale? (* (apply max bars) 2))])
     (parameterize ([plot-x-ticks no-ticks]
                    [plot-y-transform (if log-scale? log-transform (plot-y-transform))]
-                   [plot-y-ticks (if log-scale? (log-ticks) (plot-y-ticks))]
+                   ; With more powers of 10 in range than #:number, log-ticks
+                   ; labels only every other one, so it gets enough for all.
+                   [plot-y-ticks (if log-scale?
+                                     (log-ticks #:number (add1 (exact-ceiling (log (/ y-max y-min) 10))))
+                                     (plot-y-ticks))]
                    ; Outside the plot, so it can't cover any bars.
                    [plot-legend-anchor 'outside-right-top])
       ; render-benchmark-alts needs a parser to normalize to even when it
@@ -219,8 +225,8 @@
                                 (format "time relative to ~a" baseline)
                                 "mean ms")
                             (if log-scale? ", log scale" ""))
-                 #:y-min (and log-scale? (/ (apply min bars) 2))
-                 #:y-max (and log-scale? (* (apply max bars) 2))
+                 #:y-min y-min
+                 #:y-max y-max
                  #:width 1200)))
   (printf "\nplot written to ~a\n" (car plot)))
 
