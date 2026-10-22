@@ -43,6 +43,7 @@ An empty JSON array is @racket['()] and an empty JSON object is
  order of the names in the text is not kept.
 
 @examples[#:eval json-eval
+(code:comment "{\"a\": [1, 2], \"b\": {}}")
 (define obj (string->json "{\"a\": [1, 2], \"b\": {}}"))
 (hash-ref obj 'a)
 (list-ref (hash-ref obj 'a) 1)
@@ -56,6 +57,7 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @examples[#:eval json-eval
 (string->json "[]")
 (string->json "-1.5e3")
+(code:comment "[1, {\"foo\": false}, null]")
 (string->json "[1, {\"foo\": false}, null]")
 (eval:error (string->json "[1, 2"))
 ]
@@ -64,6 +66,7 @@ An empty JSON array is @racket['()] and an empty JSON object is
  character. See @racket[STRING].
 
 @examples[#:eval json-eval
+(code:comment "\"a\\nb\"")
 (string->json "\"a\\nb\"")
 ]}
 
@@ -119,9 +122,13 @@ The grammar behind @racket[string->json] is made of the parsers below.
  half produces the replacement character U+FFFD.
 
 @examples[#:eval json-eval
+(code:comment "\"hi\"")
 (parse STRING "\"hi\"")
+(code:comment "\"a\\tb \\u00e9 \\uD83D\\uDE00\"")
 (parse STRING "\"a\\tb \\u00e9 \\uD83D\\uDE00\"")
+(code:comment "\"\\uD83D!\"")
 (parse STRING "\"\\uD83D!\"")
+(code:comment "\"a b\" with a raw tab, which JSON doesn't allow")
 (eval:error (parse STRING "\"a\tb\""))
 ]}
 
@@ -141,6 +148,7 @@ The grammar behind @racket[string->json] is made of the parsers below.
 
 @examples[#:eval json-eval
 (parse OBJECT "{}")
+(code:comment "{\"a\": 1, \"b\": 2}")
 (parse OBJECT "{\"a\": 1, \"b\": 2}")
 ]}
 
@@ -150,6 +158,7 @@ The grammar behind @racket[string->json] is made of the parsers below.
  value, as produced by @racket[VALUE].
 
 @examples[#:eval json-eval
+(code:comment "\"a\": true")
 (parse PAIR "\"a\": true")
 ]}
 
