@@ -28,13 +28,4 @@ jobs:
           raco setup --check-pkg-deps --unused-pkg-deps --pkgs parser-combinator 2>&1 | tee setup.log
           ! grep -Eq 'unused dependenc(y|ies) detected' setup.log
       - name: Run tests
-        # test-engine reports failures but always exits 0, so require each
-        # test file to print its "All N tests passed!" summary.
-        run: |
-          status=0
-          for f in tests/*.rkt; do
-            out=$(raco test "$f" 2>&1) || status=1
-            echo "$out"
-            echo "$out" | grep -Eq '^All [0-9]+ tests passed!' || status=1
-          done
-          exit $status
+        run: raco test tests

@@ -1,8 +1,8 @@
 #lang info
 (define collection "parser-combinator")
-(define deps '("htdp-lib"
-               "base"))
+(define deps '("base"))
 (define build-deps '("racket-doc"
+                     "rackunit-lib"
                      "sandbox-lib"
                      "scribble-lib"))
 (define scribblings '(("scribblings/parser-combinator.scrbl" (multi-page))))

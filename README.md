@@ -61,12 +61,12 @@ scripts/doc.sh
 
 ## Tests
 
-The tests require `compiler-lib` (provides `raco test`) and `htdp-lib` (provides
-`test-engine/racket-tests`). Both ship with the full Racket distribution. On a
-minimal install (e.g. Homebrew's `minimal-racket`), install them first.
+The tests require `compiler-lib` (provides `raco test`) and `rackunit-lib`.
+Both ship with the full Racket distribution. On a minimal install (e.g.
+Homebrew's `minimal-racket`), install them first.
 
 ```sh
-raco pkg install --auto --skip-installed compiler-lib htdp-lib
+raco pkg install --auto --skip-installed compiler-lib rackunit-lib
 ```
 
 Run all of the tests.
