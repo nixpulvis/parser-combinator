@@ -4,8 +4,6 @@
 (provide string->json
          VALUE
          NUMBER
-         NONZERO-DIGIT
-         DIGIT
          STRING
          HEXIT
          ARRAY
@@ -43,37 +41,32 @@
 ; Parser
 (define-parser VALUE
   (spacey (alt* STRING
-                NUMBER
                 OBJECT
                 ARRAY
                 (seq* (const true) (lit "true"))
                 (seq* (const false) (lit "false"))
-                (seq* (const 'null) (lit "null")))))
+                (seq* (const 'null) (lit "null"))
+                NUMBER)))
 
 ; Parser
+; VALUE tries it last, so that other values don't each fail it first.
 (define-parser NUMBER
-  (seq* (lambda (sign integer fraction exponent)
-          (string->number
-           (apply string-append
-                  "#e"
-                  (flatten (list sign integer fraction exponent)))))
-         (opt (lit "-"))
-         (alt* (lit "0") (seq* list
-                               NONZERO-DIGIT
-                               (star DIGIT)))
-         (opt (seq* list (lit ".") (plus DIGIT)))
-         (opt (seq* list (alt* (lit "e") (lit "E"))
-                    (opt (alt* (lit "+") (lit "-")))
-                    (plus DIGIT)))))
+  (seq* (lambda parts
+          (string->number (apply string-append "#e" (flatten parts))))
+        (opt (lit "-"))
+        (alt (lit "0") DIGITS)
+        (opt (seq list (lit ".") DIGITS))
+        (opt (seq* list
+                   (alt (lit "e") (lit "E"))
+                   (opt (alt (lit "+") (lit "-")))
+                   DIGITS))))
+
+; Char -> Boolean
+(define (digit? c) (char<=? #\0 c #\9))
 
 ; Parser
-(define-parser NONZERO-DIGIT
-  (alt* (lit "1") (lit "2") (lit "3") (lit "4") (lit "5") (lit "6") (lit "7")
-         (lit "8") (lit "9")))
-
-; Parser
-(define-parser DIGIT
-  (alt* (lit "0") NONZERO-DIGIT))
+; Matches a run of digits.
+(define DIGITS (span digit?))
 
 ; Parser
 ; Plain text is matched a run at a time with `span`, rather than a
@@ -101,8 +94,7 @@
 
 ; Parser
 (define-parser HEXIT
-  (alt* DIGIT (lit "a") (lit "b") (lit "c") (lit "d") (lit "e") (lit "f")
-               (lit "A") (lit "B") (lit "C") (lit "D") (lit "E") (lit "F")))
+  (rx #rx"[0-9a-fA-F]"))
 
 ; Parser
 (define-parser ARRAY

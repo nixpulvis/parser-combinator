@@ -70,9 +70,9 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-grammar"]{Grammar}
 
-The grammar behind @racket[string->json] is made of the parsers below. A
- few small ones match single characters, and their @|Value|s are the
- matched characters as strings. The rest produce the @JSON itself, using
+The grammar behind @racket[string->json] is made of the parsers below.
+ @racket[SPACE] and @racket[HEXIT] match text, and their @|Value|s are
+ the matched text. The rest produce the @JSON itself, using
  @racket[seq] and @racket[seq*] constructors: @racket[NUMBER],
  @racket[STRING], @racket[ARRAY], and @racket[OBJECT] for those kinds of
  value, @racket[PAIR] for one name and value in an object, and
@@ -92,10 +92,10 @@ The grammar behind @racket[string->json] is made of the parsers below. A
 
 @defthing[NUMBER #,Parser]{
  matches a JSON number: an optional @tt{-}, then either @tt{0} or a
- @racket[NONZERO-DIGIT] followed by any number of @racket[DIGIT]s, then an
- optional fraction, then an optional exponent. The fraction is a @tt{.}
- followed by one or more @racket[DIGIT]s. The exponent is an @tt{e} or
- @tt{E}, an optional @tt{+} or @tt{-}, and one or more @racket[DIGIT]s.
+ non-zero digit followed by any number of digits, then an optional
+ fraction, then an optional exponent. The fraction is a @tt{.} followed
+ by one or more digits. The exponent is an @tt{e} or @tt{E}, an optional
+ @tt{+} or @tt{-}, and one or more digits.
 
  It produces the number as an exact number.
 
@@ -103,23 +103,6 @@ The grammar behind @racket[string->json] is made of the parsers below. A
 (parse NUMBER "7")
 (parse NUMBER "-1.5e2")
 (eval:error (parse NUMBER "1."))
-]}
-
-@defthing[NONZERO-DIGIT #,Parser]{
- matches one non-zero digit, @tt{1} through @tt{9}. The @Value is the
- digit as a string.
-
-@examples[#:eval json-eval
-(parse NONZERO-DIGIT "7")
-(eval:error (parse NONZERO-DIGIT "0"))
-]}
-
-@defthing[DIGIT #,Parser]{
- matches one digit, @tt{0} through @tt{9}, using @racket[NONZERO-DIGIT]
- for the non-zero ones. The @Value is the digit as a string.
-
-@examples[#:eval json-eval
-(parse DIGIT "0")
 ]}
 
 @defthing[STRING #,Parser]{
@@ -138,7 +121,7 @@ The grammar behind @racket[string->json] is made of the parsers below. A
 ]}
 
 @defthing[HEXIT #,Parser]{
- matches one hexadecimal digit: a @racket[DIGIT], or a letter from
+ matches one hexadecimal digit, @tt{0} through @tt{9} or a letter from
  @tt{a} through @tt{f} in either case. The @Value is the character as a
  string.
 
