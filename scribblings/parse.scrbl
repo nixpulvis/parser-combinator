@@ -37,7 +37,8 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  this library produce plain Racket values:
 @itemlist[
  @item{@racket[emp] produces @racket['()]}
- @item{@racket[lit] and @racket[rx] produce the matched text, a string}
+ @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
+ text, a string}
  @item{@racket[seq] and @racket[seq*] produce whatever their
  constructor returns, given their parsers' @|Value|s}
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
@@ -148,6 +149,25 @@ The parsers made by this library pass positions in the input to one
 ((rx #px"\\d+") "42x")
 ((rx #rx"a|b") "xb")
 ]}
+
+@defproc[(span [ok? (-> char? any/c)]) #,Parser]{
+ produces a @Parser that matches the longest run of one or more
+ characters at the start of its input that @racket[ok?] accepts. It
+ fails if the first character isn't accepted, or if there is no input
+ left. The @Value is the matched text.
+
+@examples[#:eval parse-eval
+((span char-alphabetic?) "abc123")
+((span char-numeric?) "abc")
+]
+
+ A @racket[span] matches the same text as an @racket[rx] for a character
+ class, such as @racket[(rx #rx"[a-z]+")], but costs less when the runs
+ are short. Matching a regexp against a string has a cost every time,
+ even when it matches one character or none, and @racket[span] only
+ checks characters. Because it always takes the longest run, it can't
+ match a fixed number of characters, which takes an @racket[rx] such as
+ @racket[(rx #px"[0-9]{4}")].}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "combinator"]{Combinators}

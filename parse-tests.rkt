@@ -42,6 +42,18 @@
 (check-expect ((rx #rx"a") "")
               'error)
 
+; span tests
+(check-expect ((span char-alphabetic?) "abc123")
+              (result "abc" "123"))
+(check-expect ((span char-alphabetic?) "abc")
+              (result "abc" ""))
+(check-expect ((span char-numeric?) "abc")
+              'error)
+(check-expect ((span char-numeric?) "")
+              'error)
+(check-expect ((seq list (lit "x") (span char-numeric?)) "x42y")
+              (result (list "x" "42") "y"))
+
 ; alt tests
 (check-expect ((alt (lit "+") (lit "-")) "+123")
               (result "+" "123"))

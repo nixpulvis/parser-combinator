@@ -6,6 +6,7 @@
          emp
          lit
          rx
+         span
          seq
          seq*
          alt
@@ -22,7 +23,7 @@
 
 ; A Value is whatever a parser produces:
 ; - `emp` produces '()
-; - `lit` and `rx` produce the matched String
+; - `lit`, `rx` and `span` produce the matched String
 ; - `seq` and `seq*` produce whatever their constructor returns,
 ;   given their parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
@@ -137,6 +138,20 @@
          (if m
              (matched (substring s i (cdar m)) (cdar m))
              'error))))))
+
+; [Char -> Any] -> Parser
+; Matches the longest run of one or more characters that `ok?` accepts.
+; Unlike `rx`, it has no fixed cost per match, so it suits runs that are
+; often short, like whitespace.
+(define (span ok?)
+  (parser
+   (lambda (s i)
+     (let loop ([j i])
+       (if (and (< j (string-length s)) (ok? (string-ref s j)))
+           (loop (add1 j))
+           (if (= j i)
+               'error
+               (matched (substring s i j) j)))))))
 
 ; Symbol Any Natural -> Void
 ; Raises an error for `who` unless `build` is a constructor that accepts
