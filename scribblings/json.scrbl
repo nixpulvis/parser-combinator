@@ -60,8 +60,8 @@ An empty JSON array is @racket['()] and an empty JSON object is
 (eval:error (string->json "[1, 2"))
 ]
 
- Strings are produced as they appear in the text: escape sequences such
- as @tt{\n} are not decoded.
+ Escape sequences in strings are decoded, so @tt{\n} becomes a newline
+ character. See @racket[STRING].
 
 @examples[#:eval json-eval
 (string->json "\"a\\nb\"")
@@ -71,13 +71,12 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @section[#:tag "json-grammar"]{Grammar}
 
 The grammar behind @racket[string->json] is made of the parsers below.
- @racket[SPACE] and @racket[HEXIT] match text, and their @|Value|s are
- the matched text. The rest produce the @JSON itself, using
- @racket[seq] and @racket[seq*] constructors: @racket[NUMBER],
- @racket[STRING], @racket[ARRAY], and @racket[OBJECT] for those kinds of
- value, @racket[PAIR] for one name and value in an object, and
- @racket[VALUE] for any JSON value. These parsers are exported so that
- programs can use them directly.
+ @racket[SPACE] matches whitespace, and its @Value is the matched text.
+ The rest produce the @JSON itself, using @racket[seq] and @racket[seq*]
+ constructors: @racket[NUMBER], @racket[STRING], @racket[ARRAY], and
+ @racket[OBJECT] for those kinds of value, @racket[PAIR] for one name and
+ value in an object, and @racket[VALUE] for any JSON value. These parsers
+ are exported so that programs can use them directly.
 
 @defthing[VALUE #,Parser]{
  matches any JSON value along with the whitespace around it. It
@@ -110,23 +109,20 @@ The grammar behind @racket[string->json] is made of the parsers below.
  accepts any character other than @tt{\}, @tt{"}, and the control
  characters U+0000 through U+001F. It also accepts the escape sequences
  @tt{\"}, @tt{\\}, @tt{\/}, @tt{\b}, @tt{\f}, @tt{\n}, @tt{\r}, @tt{\t},
- and @tt{\u} followed by four @racket[HEXIT]s.
+ and @tt{\u} followed by four hexadecimal digits, in either case.
 
- It produces the text between the quotes as a string. Escape sequences
- are left as they are.
+ It produces the text between the quotes as a string, with each escape
+ sequence replaced by the character it stands for. A @tt{\u} escape
+ names a UTF-16 code unit, so a character outside the Basic Multilingual
+ Plane is written as a surrogate pair, two @tt{\u} escapes in a row,
+ which together produce one character. A surrogate without its other
+ half produces the replacement character U+FFFD.
 
 @examples[#:eval json-eval
 (parse STRING "\"hi\"")
+(parse STRING "\"a\\tb \\u00e9 \\uD83D\\uDE00\"")
+(parse STRING "\"\\uD83D!\"")
 (eval:error (parse STRING "\"a\tb\""))
-]}
-
-@defthing[HEXIT #,Parser]{
- matches one hexadecimal digit, @tt{0} through @tt{9} or a letter from
- @tt{a} through @tt{f} in either case. The @Value is the character as a
- string.
-
-@examples[#:eval json-eval
-(parse HEXIT "F")
 ]}
 
 @defthing[ARRAY #,Parser]{
