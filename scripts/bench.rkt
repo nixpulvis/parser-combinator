@@ -154,7 +154,7 @@
       (let ([base (hash-ref base-means (benchmark-result-name r))])
         (and (not (zero? base)) (/ (mean-time r) base))))))
 
-; [Listof Parser] (U String #f) Natural [Listof Natural] (U Plot #f) Boolean -> Void
+; [Listof Parser] (U String #f) Natural [Listof Natural] (U Path #f) Boolean -> Void
 ; Benchmarks each parser, printing the results, and plotting them too if
 ; there's a `plot`. With a `baseline`, the label of one of the parsers,
 ; times are also shown relative to its. With `log-scale?`, the plot's
@@ -188,7 +188,7 @@
     (when plot
       (plot-results results baseline plot log-scale?))))
 
-; [Listof benchmark-result] (U String #f) Plot Boolean -> Void
+; [Listof benchmark-result] (U String #f) Path Boolean -> Void
 ; Plots each result's mean, relative to the `baseline` parser's on the
 ; same input if there is one, on a log scale if `log-scale?`.
 (define (plot-results results baseline plot log-scale?)
@@ -216,8 +216,7 @@
                                         results
                                         #:format-opts car
                                         #:normalize? (and baseline #t))
-                 (car plot)
-                 (cdr plot)
+                 plot
                  #:title "string->json"
                  #:x-label #f
                  #:y-label (string-append
@@ -228,7 +227,7 @@
                  #:y-min y-min
                  #:y-max y-max
                  #:width 1200)))
-  (printf "\nplot written to ~a\n" (car plot)))
+  (printf "\nplot written to ~a\n" plot))
 
 ; [Listof benchmark-result] (U String #f) -> Void
 ; Prints each result's mean and 95% confidence interval, computed as the
@@ -287,33 +286,22 @@
       (raise-user-error 'bench "~a must be a positive integer, given ~s" flag str))
     n))
 
-; The extensions plot-file can write, and the format of each.
-(define plot-formats
-  '(("png" . png) ("jpg" . jpeg) ("jpeg" . jpeg) ("bmp" . bmp) ("xbm" . xbm)
-    ("xpm" . xpm) ("pdf" . pdf) ("ps" . ps) ("svg" . svg)))
-
-; A Plot is a (cons Path Symbol), a file to plot to and its format.
-
-; String -> Plot
-; The Plot for --plot's file. Raises a user error, so that a bad --plot
-; fails before any benchmark runs, if plot-file can't write the file's
-; extension, or if the file's directory doesn't exist.
-(define (plot-target file)
+; String -> Path
+; The path for --plot's file. Raises a user error, so that a bad --plot
+; fails before any benchmark runs, if plot-file can't tell a format from
+; the file's extension, or if the file's directory doesn't exist.
+(define (plot-path file)
   (let* ([path (path->complete-path file)]
          [ext (path-get-extension path)]
-         [format (and ext
-                      (assoc (string-downcase (substring (bytes->string/utf-8 ext) 1))
-                             plot-formats))])
-    (unless format
+         [exts '(".png" ".jpg" ".jpeg" ".bmp" ".xbm" ".xpm" ".pdf" ".ps" ".svg")])
+    (unless (and ext (member (string-downcase (bytes->string/utf-8 ext)) exts))
       (raise-user-error 'bench "--plot can't write ~a; use one of ~a"
                         file
-                        (string-join (for/list ([f (in-list plot-formats)])
-                                       (string-append "." (car f)))
-                                     ", ")))
+                        (string-join exts ", ")))
     (let-values ([(dir name must-be-dir?) (split-path path)])
       (unless (directory-exists? dir)
         (raise-user-error 'bench "--plot can't write ~a; ~a doesn't exist" file dir)))
-    (cons path (cdr format))))
+    path))
 
 (module+ main
   (define racket? #f)
@@ -338,7 +326,7 @@
                   (set! sizes (for/list ([s (in-list (string-split ns ","))])
                                 (positive-integer "--sizes" s)))]
      [("--plot") file "Also plot the times to file, such as a .png, .svg, or .pdf"
-                 (set! plot (plot-target file))]
+                 (set! plot (plot-path file))]
      [("--log-scale") "Plot the times on a log scale, so a much slower parser doesn't flatten the rest"
                       (set! log-scale? #t)]
      #:args refs
