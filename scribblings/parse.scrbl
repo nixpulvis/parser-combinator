@@ -266,9 +266,13 @@ The parsers made by this library pass positions in the input to one
 
  Like @racket[alt], @racket[star] never gives back a match, so
  @racket[(seq list (star (lit "a")) (lit "a"))] matches nothing at
- all. A parser @racket[p] that can succeed without consuming input, such
- as @racket[(opt _q)], makes @racket[(star p)] loop forever once
- @racket[p] matches the empty string before the end of the input.}
+ all. It stops at the first match of @racket[p] that consumes no input,
+ leaving that match out, so a @racket[p] that can match the empty string,
+ such as @racket[(opt _q)], can't make it repeat forever.
+
+@examples[#:eval parse-eval
+((star (opt (lit "a"))) "aab")
+]}
 
 @defproc[(plus [p #,Parser]) #,Parser]{
  produces a @Parser that matches @racket[p] one or more times. The @Value

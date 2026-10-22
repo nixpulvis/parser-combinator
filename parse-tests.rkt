@@ -168,6 +168,13 @@
               (result (list "1" "2") ""))
 (check-expect ((star (seq list (lit "a") (lit "b"))) "abab")
               (result (list (list "a" "b") (list "a" "b")) ""))
+; star stops at a match that consumes nothing, rather than looping.
+(check-expect ((star (opt (lit "a"))) "aab")
+              (result (list "a" "a") "b"))
+(check-expect ((star (rx #rx"a*")) "aab")
+              (result (list "aa") "b"))
+(check-expect ((plus (opt (lit "a"))) "b")
+              (result (list '()) "b"))
 
 ; unwrap tests
 (check-expect ((unwrap (lit "+") (lit "!") (lit "+")) "+!+")

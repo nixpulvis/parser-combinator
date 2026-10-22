@@ -204,17 +204,16 @@
 (define (opt p)
   (alt p (emp)))
 
-; TODO: Stop when `p` matches without consuming input. Today a parser
-; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
-; makes `star` loop forever once it matches before the end of the input.
 ; Parser -> Parser
-; The parser is built once, and refers to itself for each further match,
-; rather than being built again for every match.
+; Stops when `p` fails, or matches without consuming input, which would
+; otherwise repeat forever. The parser is built once, and refers to
+; itself for each further match.
 (define (star p)
-  (letrec ([self (alt (seq cons p (parser (lambda (s i)
-                                            (if (= i (string-length s))
-                                                (matched '() i)
-                                                (run self s i)))))
+  (letrec ([step (parser
+                  (lambda (s i)
+                    (let ([m (run p s i)])
+                      (if (and (matched? m) (> (matched-end m) i)) m 'error))))]
+           [self (alt (seq cons step (parser (lambda (s i) (run self s i))))
                       (emp))])
     self))
 
