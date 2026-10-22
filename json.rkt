@@ -1,11 +1,11 @@
 #lang racket
-(require "parse.rkt")
+(require "parse.rkt"
+         (submod "parse.rkt" positions))
 
 (provide string->json
          VALUE
          NUMBER
          STRING
-         HEXIT
          ARRAY
          OBJECT
          PAIR
@@ -74,28 +74,104 @@
 ; character at a time, so a long string doesn't cost a parser step per
 ; character.
 (define-parser STRING
-  (seq* (lambda (open chars close) (apply string-append (flatten chars)))
+  (seq* (lambda (open pieces close) (apply string-append pieces))
         (lit "\"")
-        (star (alt* (span string-char?)
-                    (lit "\\\"")
-                    (lit "\\\\")
-                    (lit "\\/")
-                    (lit "\\b")
-                    (lit "\\f")
-                    (lit "\\n")
-                    (lit "\\r")
-                    (lit "\\t")
-                    (seq* list (lit "\\u") HEXIT HEXIT HEXIT HEXIT)))
+        (star (switch [(#\\) ESCAPE]
+                      [else (span string-char?)]))
         (lit "\"")))
+
+; Parser
+; Matches an escape sequence, producing the character it stands for as a
+; String. The backslash is matched once, and the letter after it chooses
+; the rest with `switch`, rather than each escape being tried in turn.
+(define-parser ESCAPE
+  ; String String -> Parser
+  ; Matches the letter of an escape, producing the character it stands for.
+  (let ([escaped (lambda (letter char) (seq* (const char) (lit letter)))])
+    (seq (lambda (backslash c) c)
+         (lit "\\")
+         (switch [(#\") (escaped "\"" "\"")]
+                 [(#\\) (escaped "\\" "\\")]
+                 [(#\/) (escaped "/" "/")]
+                 [(#\b) (escaped "b" "\b")]
+                 [(#\f) (escaped "f" "\f")]
+                 [(#\n) (escaped "n" "\n")]
+                 [(#\r) (escaped "r" "\r")]
+                 [(#\t) (escaped "t" "\t")]
+                 [(#\u) UNICODE-ESCAPE]))))
+
+; Parser
+; Matches the rest of a `\u` escape after its backslash, or of a UTF-16
+; surrogate pair of them, producing the character it names as a String.
+; A surrogate without its other half produces the replacement character
+; U+FFFD.
+(define-parser UNICODE-ESCAPE
+  (alt (seq (lambda (high low)
+              (string (integer->char
+                       (+ first-supplementary
+                          (arithmetic-shift (- high first-high-surrogate)
+                                            surrogate-bits)
+                          (- low first-low-surrogate)))))
+            (where CODE-UNIT high-surrogate?)
+            (seq (lambda (backslash low) low)
+                 (lit "\\")
+                 (where CODE-UNIT low-surrogate?)))
+       (seq* (lambda (n)
+               (string (if (surrogate? n)
+                           replacement-character
+                           (integer->char n))))
+             CODE-UNIT)))
+
+; Parser
+; Matches the `uXXXX` of a `\u` escape, after its backslash, producing
+; the UTF-16 code unit it names as a Natural.
+(define CODE-UNIT
+  (parser
+   (lambda (s i)
+     (let ([end (+ i 5)])
+       (if (and (<= end (string-length s))
+                (char=? (string-ref s i) #\u))
+           (let loop ([j (add1 i)] [n 0])
+             (cond [(= j end) (matched n j)]
+                   [(hex-digit (string-ref s j))
+                    => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
+                   [else 'error]))
+           'error)))))
+
+; Char -> [Maybe Natural]
+; The value of `c` as a hexadecimal digit, or #f if it isn't one.
+(define (hex-digit c)
+  (cond [(char<=? #\0 c #\9) (- (char->integer c) (char->integer #\0))]
+        [(char<=? #\a c #\f) (+ 10 (- (char->integer c) (char->integer #\a)))]
+        [(char<=? #\A c #\F) (+ 10 (- (char->integer c) (char->integer #\A)))]
+        [else #f]))
+
+; Natural
+; A `\u` escape names a UTF-16 code unit, which only reaches U+FFFF. A
+; character from first-supplementary on, like U+1F600, takes two: a high
+; surrogate, then a low surrogate, as in `\uD83D\uDE00`. Its code point
+; minus first-supplementary has 20 bits, and each surrogate holds
+; surrogate-bits of them, the high surrogate the top half.
+(define first-high-surrogate #xD800)
+(define last-high-surrogate #xDBFF)
+(define first-low-surrogate #xDC00)
+(define last-low-surrogate #xDFFF)
+(define first-supplementary #x10000)
+(define surrogate-bits 10)
+
+; Char
+; Stands in for a surrogate without its other half.
+(define replacement-character #\uFFFD)
+
+; Natural -> Boolean
+(define (high-surrogate? n) (<= first-high-surrogate n last-high-surrogate))
+(define (low-surrogate? n) (<= first-low-surrogate n last-low-surrogate))
+(define (surrogate? n) (<= first-high-surrogate n last-low-surrogate))
 
 ; Char -> Boolean
 ; Whether the character can appear in a JSON string without an escape.
 (define (string-char? c)
   (not (or (char=? c #\") (char=? c #\\) (char<? c #\space))))
-
-; Parser
-(define-parser HEXIT
-  (rx #rx"[0-9a-fA-F]"))
 
 ; Parser
 (define-parser ARRAY
