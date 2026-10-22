@@ -15,12 +15,9 @@
 ; there's more than one parser, times are also shown relative to the --vs
 ; parser's, or else to racket's, or else to the first ref's.
 (require benchmark
-         json
          math/statistics
          plot
-         racket/cmdline
          racket/format
-         racket/path
          racket/list
          racket/math
          racket/string)
@@ -29,6 +26,9 @@
 ; parses a JSON text.
 
 (module+ main
+  (require json
+           racket/cmdline
+           racket/path)
   (define racket? #f)
   (define merge? #f)
   (define vs #f)
