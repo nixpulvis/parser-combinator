@@ -13,7 +13,8 @@
 ; benchmarked. With --merge, so is a merge of each combination of the
 ; refs. With --racket, so is string->jsexpr, as the parser "racket". When
 ; there's more than one parser, times are also shown relative to the --vs
-; parser's, or else to racket's, or else to the first ref's.
+; parser's, or else to racket's, or else to the first ref's. The plot shows
+; mean ms, unless --vs is given, when it shows times relative to its parser's.
 (require benchmark
          math/statistics
          plot
@@ -59,7 +60,7 @@
                    (set! racket? #t)]
      [("--merge") "Also benchmark a merge of each combination of the refs, skipping any that conflict"
                   (set! merge? #t)]
-     [("--vs") parser "Show times relative to parser's, a ref, a merge such as a+b, or racket (default racket if benchmarked, else the first ref)"
+     [("--vs") parser "Show times relative to parser's, a ref, a merge such as a+b, or racket (default racket if benchmarked, else the first ref), and plot them relative to it too"
                (set! vs parser)]
      [("--trials") n "Times to run each benchmark (default 30)"
                    (set! trials (positive-integer "--trials" n))]
@@ -90,16 +91,15 @@
                            vs
                            (string-join (map car parsers) ", ")))
        ; With one parser, there's nothing to compare it to.
-       (bench parsers
-              (and (> (length parsers) 1) (or vs (car (first parsers))))
-              trials sizes plot log-scale?)))))
+       (let ([baseline (and (> (length parsers) 1) (or vs (car (first parsers))))])
+         (bench parsers baseline (and baseline vs #t) trials sizes plot log-scale?))))))
 
-; [Listof Parser] (U String #f) Natural [Listof Natural] (U Path #f) Boolean -> Void
+; [Listof Parser] (U String #f) Boolean Natural [Listof Natural] (U Path #f) Boolean -> Void
 ; Benchmarks each parser, printing the results, and plotting them too if
 ; there's a `plot`. With a `baseline`, the label of one of the parsers,
-; times are also shown relative to its. With `log-scale?`, the plot's
-; y-axis is a log scale.
-(define (bench parsers baseline trials sizes plot log-scale?)
+; times are also shown relative to its, and plotted relative to its if
+; `plot-relative?`. With `log-scale?`, the plot's y-axis is a log scale.
+(define (bench parsers baseline plot-relative? trials sizes plot log-scale?)
   (let* (; Inputs are made before timing starts. A What is (list case size),
          ; and names the input `inputs` maps it to.
          [whats (for*/list ([c (in-list cases)] [n (in-list sizes)])
@@ -126,7 +126,7 @@
            #:make-name what-name)])
     (print-table results baseline)
     (when plot
-      (plot-results results baseline plot log-scale?))))
+      (plot-results results (and plot-relative? baseline) plot log-scale?))))
 
 ; A Case is a (cons String [Natural -> String]), a name and a function
 ; that makes a JSON text of about the given size.
@@ -228,7 +228,7 @@
                    ; Outside the plot, so it can't cover any bars.
                    [plot-legend-anchor 'outside-right-top])
       ; render-benchmark-alts needs a parser to normalize to even when it
-      ; doesn't normalize, so without a baseline it gets the only one.
+      ; doesn't normalize, so without a baseline it gets the first result's.
       (plot-file (render-benchmark-alts (if baseline
                                             (list baseline)
                                             (benchmark-result-opts (first results)))
