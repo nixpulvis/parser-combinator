@@ -155,7 +155,8 @@
         (and (not (zero? base)) (/ (mean-time r) base))))))
 
 ; [Listof Parser] (U String #f) Natural [Listof Natural] (U Plot #f) Boolean -> Void
-; Benchmarks each parser. With a `baseline`, the label of one of them,
+; Benchmarks each parser, printing the results, and plotting them too if
+; there's a `plot`. With a `baseline`, the label of one of the parsers,
 ; times are also shown relative to its. With `log-scale?`, the plot's
 ; y-axis is a log scale.
 (define (bench parsers baseline trials sizes plot log-scale?)
@@ -185,33 +186,43 @@
            #:make-name what-name)])
     (print-table results baseline)
     (when plot
-      ; A log scale keeps a parser many times slower than the others from
-      ; flattening their bars. It can't reach 0, where the bars start, so
-      ; it runs from half the smallest bar to twice the largest.
-      (let ([bars (filter-map (if baseline (relative-to results baseline) mean-time)
-                              results)])
-        (parameterize ([plot-x-ticks no-ticks]
-                       [plot-y-transform (if log-scale? log-transform (plot-y-transform))]
-                       [plot-y-ticks (if log-scale? (log-ticks) (plot-y-ticks))]
-                       ; Outside the plot, so it can't cover any bars.
-                       [plot-legend-anchor 'outside-right-top])
-          (plot-file (render-benchmark-alts (list (or baseline (car (first parsers))))
-                                            results
-                                            #:format-opts car
-                                            #:normalize? (and baseline #t))
-                     (car plot)
-                     (cdr plot)
-                     #:title "string->json"
-                     #:x-label #f
-                     #:y-label (string-append
-                                (if baseline
-                                    (format "time relative to ~a" baseline)
-                                    "mean ms")
-                                (if log-scale? ", log scale" ""))
-                     #:y-min (and log-scale? (/ (apply min bars) 2))
-                     #:y-max (and log-scale? (* (apply max bars) 2))
-                     #:width 1200)))
-      (printf "\nplot written to ~a\n" (car plot)))))
+      (plot-results results baseline plot log-scale?))))
+
+; [Listof benchmark-result] (U String #f) Plot Boolean -> Void
+; Plots each result's mean, relative to the `baseline` parser's on the
+; same input if there is one, on a log scale if `log-scale?`.
+(define (plot-results results baseline plot log-scale?)
+  ; A log scale keeps a parser many times slower than the others from
+  ; flattening their bars. It can't reach 0, where the bars start, so it
+  ; runs from half the smallest bar to twice the largest.
+  (let ([bars (filter-map (if baseline (relative-to results baseline) mean-time)
+                          results)])
+    (parameterize ([plot-x-ticks no-ticks]
+                   [plot-y-transform (if log-scale? log-transform (plot-y-transform))]
+                   [plot-y-ticks (if log-scale? (log-ticks) (plot-y-ticks))]
+                   ; Outside the plot, so it can't cover any bars.
+                   [plot-legend-anchor 'outside-right-top])
+      ; render-benchmark-alts needs a parser to normalize to even when it
+      ; doesn't normalize, so without a baseline it gets the only one.
+      (plot-file (render-benchmark-alts (if baseline
+                                            (list baseline)
+                                            (benchmark-result-opts (first results)))
+                                        results
+                                        #:format-opts car
+                                        #:normalize? (and baseline #t))
+                 (car plot)
+                 (cdr plot)
+                 #:title "string->json"
+                 #:x-label #f
+                 #:y-label (string-append
+                            (if baseline
+                                (format "time relative to ~a" baseline)
+                                "mean ms")
+                            (if log-scale? ", log scale" ""))
+                 #:y-min (and log-scale? (/ (apply min bars) 2))
+                 #:y-max (and log-scale? (* (apply max bars) 2))
+                 #:width 1200)))
+  (printf "\nplot written to ~a\n" (car plot)))
 
 ; [Listof benchmark-result] (U String #f) -> Void
 ; Prints each result's mean and 95% confidence interval, computed as the
@@ -237,16 +248,7 @@
                  (list (list (format "vs ~a" baseline) 'right
                              (lambda (r)
                                (let ([x (relative r)])
-                                 (if x
-                                     ; Two significant figures below 1x, so
-                                     ; a parser 40 times faster isn't 0.0x.
-                                     (string-append
-                                      (~r x #:precision
-                                          (list '= (if (< 0 x 1)
-                                                       (- 1 (exact-floor (log x 10)))
-                                                       1)))
-                                      "x")
-                                     "-"))))))
+                                 (if x (format-ratio x) "-"))))))
                '()))]
          [rows (cons (map car columns)
                      (for/list ([r (in-list results)])
@@ -261,6 +263,15 @@
                    [align (in-list (map cadr columns))])
           (~a cell #:min-width width #:align align))
         "  ")))))
+
+; Nonnegative-Real -> String
+; Formats a ratio such as 1.5x, with two significant figures below 1x, so
+; a parser 40 times faster isn't 0.0x.
+(define (format-ratio x)
+  (string-append (~r x #:precision (list '= (if (< 0 x 1)
+                                                (- 1 (exact-floor (log x 10)))
+                                                1)))
+                 "x"))
 
 ; String String -> Natural
 (define (positive-integer flag str)
