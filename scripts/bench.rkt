@@ -234,7 +234,7 @@
 ; Prints each result's mean and 95% confidence interval, computed as the
 ; plots from render-benchmark-alts compute theirs. With a `baseline`
 ; parser's label, it also names the parser of each result and shows each
-; mean relative to the baseline's on the same input.
+; other parser's mean relative to the baseline's on the same input.
 (define (print-table results baseline)
   (let* (; Each column is (list header alignment [benchmark-result -> String]).
          [columns
@@ -253,7 +253,8 @@
                (let ([relative (relative-to results baseline)])
                  (list (list (format "vs ~a" baseline) 'right
                              (lambda (r)
-                               (let ([x (relative r)])
+                               (let ([x (and (not (equal? (benchmark-result-opts r) (list baseline)))
+                                             (relative r))])
                                  (if x (format-ratio x) "-"))))))
                '()))]
          [rows (cons (map car columns)
