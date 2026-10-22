@@ -72,7 +72,7 @@ raco pkg install --auto --skip-installed compiler-lib htdp-lib
 Run all of the tests.
 
 ```sh
-raco test *-tests.rkt
+raco test tests
 ```
 
 ## Benchmarks
@@ -114,7 +114,7 @@ scripts/bench.rkt --racket --vs master master my-branch
 On `master` as of 2026-10-22, against Racket's parser.
 
 ```sh
-scripts/bench.rkt --racket --vs racket --plot bench-racket-2026-10-22.svg
+scripts/bench.rkt --racket --vs racket --plot assets/bench-racket-2026-10-22.svg
 ```
 
-![string->json times relative to string->jsexpr](bench-racket-2026-10-22.svg)
+![string->json times relative to string->jsexpr](assets/bench-racket-2026-10-22.svg)

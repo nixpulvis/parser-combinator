@@ -1,7 +1,7 @@
 #lang racket
 (require test-engine/racket-tests)
-(require "parse.rkt")
-(require (submod "parse.rkt" positions))
+(require "../parse.rkt")
+(require (submod "../parse.rkt" positions))
 
 ; define-parser tests
 (define builds 0)

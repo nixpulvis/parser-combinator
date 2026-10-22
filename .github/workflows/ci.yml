@@ -32,7 +32,7 @@ jobs:
         # test file to print its "All N tests passed!" summary.
         run: |
           status=0
-          for f in *-tests.rkt; do
+          for f in tests/*.rkt; do
             out=$(raco test "$f" 2>&1) || status=1
             echo "$out"
             echo "$out" | grep -Eq '^All [0-9]+ tests passed!' || status=1

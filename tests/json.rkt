@@ -1,7 +1,7 @@
 #lang racket
 (require test-engine/racket-tests)
-(require "parse.rkt")
-(require "json.rkt")
+(require "../parse.rkt")
+(require "../json.rkt")
 
 ; SPACE tests
 (check-expect (parse SPACE " \t\n\r ")
