@@ -1,27 +1,27 @@
 #lang racket
 
-(provide define-parser
+(provide (struct-out result)
+         define-parser
+         emp
          lit
          rx
-         alt
-         alt*
          seq
          seq*
+         alt
+         alt*
          opt
-         emp
-         plus
          star
+         plus
          unwrap
-         parse
-         (struct-out result))
+         parse)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
 ; ----------------------------------------
 
 ; A Value is whatever a parser produces:
-; - `lit` and `rx` produce the matched String
 ; - `emp` produces '()
+; - `lit` and `rx` produce the matched String
 ; - `seq` and `seq*` produce whatever their constructor returns,
 ;   given their parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
@@ -82,6 +82,12 @@
                 (unless p (set! p body))
                 (run p s i))))))
 
+; -> Parser
+(define (emp)
+  (parser
+   (lambda (s i)
+     (matched '() i))))
+
 ; String -> Parser
 (define (lit str)
   (let ([len (string-length str)])
@@ -107,19 +113,6 @@
          (if m
              (matched (substring s i (cdar m)) (cdar m))
              'error))))))
-
-; Parser Parser -> Parser
-(define (alt p1 p2)
-  (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1) (run p2 s i) m1)))))
-
-; Parser Parser ... -> Parser
-(define (alt* p . ps)
-  (if (empty? ps)
-      p
-      (alt p (apply alt* ps))))
 
 ; Symbol Any Natural -> Void
 ; Raises an error for `who` unless `build` is a constructor that accepts
@@ -155,19 +148,22 @@
               (emp)
               ps)))
 
+; Parser Parser -> Parser
+(define (alt p1 p2)
+  (parser
+   (lambda (s i)
+     (let ([m1 (run p1 s i)])
+       (if (symbol? m1) (run p2 s i) m1)))))
+
+; Parser Parser ... -> Parser
+(define (alt* p . ps)
+  (if (empty? ps)
+      p
+      (alt p (apply alt* ps))))
+
 ; Parser -> Parser
 (define (opt p)
   (alt p (emp)))
-
-; -> Parser
-(define (emp)
-  (parser
-   (lambda (s i)
-     (matched '() i))))
-
-; Parser -> Parser
-(define (plus p)
-  (seq cons p (star p)))
 
 ; TODO: Stop when `p` matches without consuming input. Today a parser
 ; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
@@ -182,6 +178,10 @@
                                          (run (star p) s i)))))
                (emp))
           s i))))
+
+; Parser -> Parser
+(define (plus p)
+  (seq cons p (star p)))
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)

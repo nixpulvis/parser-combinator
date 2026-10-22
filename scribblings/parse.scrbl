@@ -21,8 +21,8 @@
 A @Value is whatever a @Parser produces when it matches. The parsers in
  this library produce plain Racket values:
 @itemlist[
- @item{@racket[lit] and @racket[rx] produce the matched text, a string}
  @item{@racket[emp] produces @racket['()]}
+ @item{@racket[lit] and @racket[rx] produce the matched text, a string}
  @item{@racket[seq] and @racket[seq*] produce whatever their
  constructor returns, given their parsers' @|Value|s}
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
@@ -98,6 +98,17 @@ The parsers made by this library don't copy their input as they run.
 @; -----------------------------------------------------------------------------
 @section[#:tag "primitive"]{Primitive Parsers}
 
+@defproc[(emp) #,Parser]{
+ produces a @Parser that always succeeds without consuming any input.
+ The @Value is @racket['()].
+
+ Note that @racket[emp] is a function that produces a parser, not a
+ parser itself, so it is used as @racket[(emp)].
+
+@examples[#:eval parse-eval
+((emp) "abc")
+]}
+
 @defproc[(lit [str string?]) #,Parser]{
  produces a @Parser that matches the text @racket[str] at the start of
  its input. The @Value is @racket[str].
@@ -120,17 +131,6 @@ The parsers made by this library don't copy their input as they run.
 ((rx #rx"[^ab]") "bad")
 ((rx #px"\\d+") "42x")
 ((rx #rx"a|b") "xb")
-]}
-
-@defproc[(emp) #,Parser]{
- produces a @Parser that always succeeds without consuming any input.
- The @Value is @racket['()].
-
- Note that @racket[emp] is a function that produces a parser, not a
- parser itself, so it is used as @racket[(emp)].
-
-@examples[#:eval parse-eval
-((emp) "abc")
 ]}
 
 @; -----------------------------------------------------------------------------
