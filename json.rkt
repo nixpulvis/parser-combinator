@@ -76,10 +76,13 @@
   (alt* (lit "0") NONZERO-DIGIT))
 
 ; Parser
+; Plain text is matched a run at a time with `span`, rather than a
+; character at a time, so a long string doesn't cost a parser step per
+; character.
 (define-parser STRING
   (seq* (lambda (open chars close) (apply string-append (flatten chars)))
         (lit "\"")
-        (star (alt* (rx #rx"[^\"\\\u0000-\u001F]")
+        (star (alt* (span string-char?)
                     (lit "\\\"")
                     (lit "\\\\")
                     (lit "\\/")
@@ -90,6 +93,11 @@
                     (lit "\\t")
                     (seq* list (lit "\\u") HEXIT HEXIT HEXIT HEXIT)))
         (lit "\"")))
+
+; Char -> Boolean
+; Whether the character can appear in a JSON string without an escape.
+(define (string-char? c)
+  (not (or (char=? c #\") (char=? c #\\) (char<? c #\space))))
 
 ; Parser
 (define-parser HEXIT
@@ -128,10 +136,14 @@
        (emp)))
 
 ; Parser
+; Matches one or more whitespace characters.
 (define-parser SPACE
-  (alt*
-    (lit " ") (lit "\t") (lit "\n") (lit "\r")))
+  (span json-space?))
+
+; Char -> Boolean
+(define (json-space? c)
+  (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
 
 ; Parser -> Parser
 (define (spacey l)
-  (unwrap (star SPACE) l (star SPACE)))
+  (unwrap (opt SPACE) l (opt SPACE)))

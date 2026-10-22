@@ -175,13 +175,14 @@ The grammar behind @racket[string->json] is made of the parsers below. A
 ]}
 
 Wherever the grammar allows whitespace around a value or a punctuation
- mark, the parsers skip any number of @racket[SPACE]s with
- @racket[unwrap].
+ mark, the parsers skip an optional @racket[SPACE] with @racket[unwrap].
 
 @defthing[SPACE #,Parser]{
- matches one whitespace character: a space, a tab, a newline, or a
- carriage return. The @Value is the character as a string.
+ matches one or more whitespace characters: @racket[#\space],
+ @racket[#\tab], @racket[#\newline], and @racket[#\return]. The @Value
+ is the matched text.
 
 @examples[#:eval json-eval
-((star SPACE) " \t\nx")
+((opt SPACE) " \t\nx")
+((opt SPACE) "x")
 ]}
