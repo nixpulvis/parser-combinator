@@ -11,6 +11,7 @@
          seq*
          alt
          alt*
+         switch
          opt
          star
          plus
@@ -27,6 +28,7 @@
 ; - `seq` and `seq*` produce whatever their constructor returns,
 ;   given their parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
+; - `switch` produces the Value of the parser it chose
 ; - `opt` produces its parser's Value, or '() if its parser fails
 ; - `star` and `plus` produce the list of their parser's Values
 ; - `where` produces its parser's Value, when its condition is met
@@ -199,6 +201,34 @@
   (if (empty? ps)
       p
       (alt p (apply alt* ps))))
+
+; (switch [(Char ...) Parser] ...) : Parser
+; (switch [(Char ...) Parser] ... [else Parser]) : Parser
+; Looks at the next character without consuming it, and runs only the
+; parser of the clause that lists it, or the `else` parser if no clause
+; does or there is no character left. If the chosen parser fails, so
+; does `switch`, without trying any other clause. That is like `alt`
+; for alternatives that can only start with the characters listed for
+; them, and costs one `case` instead of trying each alternative in turn.
+; Like the other combinators, it evaluates its parser expressions once,
+; when it is made, rather than every time it runs.
+(define-syntax (switch stx)
+  (syntax-case stx (else)
+    [(_ [(c ...) p] ... [else q])
+     (with-syntax ([(t ...) (generate-temporaries #'(p ...))])
+       #'(let ([t p] ... [otherwise q])
+           (parser
+            (lambda (s i)
+              (if (< i (string-length s))
+                  (case (string-ref s i)
+                    [(c ...) (run t s i)] ...
+                    [else (run otherwise s i)])
+                  (run otherwise s i))))))]
+    [(_ [(c ...) p] ...)
+     ; Without an `else`, a character no clause lists fails. Any other
+     ; shape, such as a misplaced `else`, matches neither rule and is a
+     ; syntax error, rather than being expanded again forever.
+     #'(switch [(c ...) p] ... [else (parser (lambda (s i) 'error))])]))
 
 ; Parser -> Parser
 (define (opt p)

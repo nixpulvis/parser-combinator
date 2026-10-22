@@ -43,6 +43,7 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  constructor returns, given their parsers' @|Value|s}
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
  that matched}
+ @item{@racket[switch] produces the @Value of the parser it chose}
  @item{@racket[opt] produces its parser's @Value, or @racket['()] if its
  parser fails}
  @item{@racket[star] and @racket[plus] produce the list of their
@@ -242,6 +243,40 @@ The parsers made by this library pass positions in the input to one
 
 @examples[#:eval parse-eval
 ((alt* (lit "x") (lit "y") (lit "z")) "zebra")
+]}
+
+@defform[#:literals (else)
+         (switch [(char ...) parser-expr] ...
+                 maybe-else)
+         #:grammar ([maybe-else (code:line)
+                                [else else-expr]])]{
+ produces a @Parser that looks at the next character of its input without
+ consuming it, and runs only the parser of the clause that lists that
+ character. If no clause lists it, or no input is left, it runs the
+ @racket[else] parser, or fails if there is none. Each @racket[char] is
+ a character, and each @racket[parser-expr] and @racket[else-expr]
+ produces a @|Parser|. They are evaluated once, when the
+ @racket[switch] form is, not every time the parser runs. The @Value
+ is the chosen parser's.
+
+@examples[#:eval parse-eval
+(define SIGNED
+  (switch [(#\+ #\-) (rx #px"[+-]\\d+")]
+          [else (rx #px"\\d+")]))
+(SIGNED "-12")
+(SIGNED "12")
+]
+
+ Unlike @racket[alt], @racket[switch] commits to the clause it
+ chooses. If that parser fails, so does @racket[switch], without
+ trying any other clause. It behaves like @racket[alt*] when each
+ alternative can only start with the characters listed for it, and then
+ it costs one @racket[case] on the next character, instead of trying
+ each alternative in turn.
+
+@examples[#:eval parse-eval
+((alt (lit "ab") (lit "ac")) "ac")
+((switch [(#\a) (lit "ab")] [else (lit "ac")]) "ac")
 ]}
 
 @defproc[(opt [p #,Parser]) #,Parser]{
