@@ -4,13 +4,16 @@
 ; against Racket's own JSON parser, string->jsexpr, using the benchmark
 ; package.
 ;
-;   scripts/bench.rkt [--racket] [--merge] [--trials N] [--sizes N,...]
+;   scripts/bench.rkt [--racket] [--merge] [--vs PARSER]
+;                     [--trials N] [--sizes N,...]
 ;                     [--plot FILE [--log-scale]] [ref ...]
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree. With no refs, the working tree is
 ; benchmarked. With --merge, so is a merge of each combination of the
-; refs. With --racket, times are also shown relative to string->jsexpr's.
+; refs. With --racket, so is string->jsexpr, as the parser "racket". When
+; there's more than one parser, times are also shown relative to the --vs
+; parser's, or else to racket's, or else to the first ref's.
 (require benchmark
          json
          math/statistics
@@ -20,13 +23,12 @@
          racket/format
          racket/path
          racket/list
+         racket/math
          racket/runtime-path
          racket/string
          racket/system)
 
 (define-runtime-path root "..")
-
-(define racket-json "racket json")
 
 ; Natural String String String String -> String
 ; Repeats `item`, separated by `sep`, between `open` and `close`, until
@@ -134,17 +136,30 @@
                (values (cons (cons label (string->path dir)) checkouts)
                        (hash-set labels-by-tree tree label))])))))
 
-; [Listof (cons String Path)] Boolean Natural [Listof Natural] (U Plot #f) Boolean -> Void
-; Benchmarks string->json from each checkout, and Racket's string->jsexpr
-; too if `racket?`, in which case times are also shown relative to it.
-; With `log-scale?`, the plot's y-axis is a log scale.
-(define (bench checkouts racket? trials sizes plot log-scale?)
-  (let* ([parsers
-          (append (for/list ([c (in-list checkouts)])
-                    (cons (car c)
-                          (dynamic-require (build-path (cdr c) "json.rkt") 'string->json)))
-                  (if racket? (list (cons racket-json string->jsexpr)) '()))]
-         ; Inputs are made before timing starts. A What is (list case size),
+; A Parser is a (cons String [String -> Any]), a label and a function that
+; parses a JSON text.
+
+; benchmark-result -> Real
+(define (mean-time r)
+  (mean (benchmark-result-trial-times r)))
+
+; [Listof benchmark-result] String -> [benchmark-result -> (U Real #f)]
+; Maps each result to its mean relative to the mean of the `baseline`
+; parser's result on the same input, or to #f if that mean is 0.
+(define (relative-to results baseline)
+  (let ([base-means (for/hash ([r (in-list results)]
+                               #:when (equal? (benchmark-result-opts r) (list baseline)))
+                      (values (benchmark-result-name r) (mean-time r)))])
+    (lambda (r)
+      (let ([base (hash-ref base-means (benchmark-result-name r))])
+        (and (not (zero? base)) (/ (mean-time r) base))))))
+
+; [Listof Parser] (U String #f) Natural [Listof Natural] (U Plot #f) Boolean -> Void
+; Benchmarks each parser. With a `baseline`, the label of one of them,
+; times are also shown relative to its. With `log-scale?`, the plot's
+; y-axis is a log scale.
+(define (bench parsers baseline trials sizes plot log-scale?)
+  (let* (; Inputs are made before timing starts. A What is (list case size),
          ; and names the input `inputs` maps it to.
          [whats (for*/list ([c (in-list cases)] [n (in-list sizes)])
                   (list (car c) n))]
@@ -168,35 +183,29 @@
            #:extract-time 'delta-time
            #:num-trials trials
            #:make-name what-name)])
-    (print-table results (> (length parsers) 1) racket?)
+    (print-table results baseline)
     (when plot
       ; A log scale keeps a parser many times slower than the others from
       ; flattening their bars. It can't reach 0, where the bars start, so
       ; it runs from half the smallest bar to twice the largest.
-      (let* ([mean-of (lambda (r) (mean (benchmark-result-trial-times r)))]
-             [racket-means (for/hash ([r (in-list results)]
-                                      #:when (equal? (benchmark-result-opts r) (list racket-json)))
-                             (values (benchmark-result-name r) (mean-of r)))]
-             [bars (for/list ([r (in-list results)])
-                     (if racket?
-                         (/ (mean-of r) (hash-ref racket-means (benchmark-result-name r)))
-                         (mean-of r)))])
+      (let ([bars (filter-map (if baseline (relative-to results baseline) mean-time)
+                              results)])
         (parameterize ([plot-x-ticks no-ticks]
                        [plot-y-transform (if log-scale? log-transform (plot-y-transform))]
                        [plot-y-ticks (if log-scale? (log-ticks) (plot-y-ticks))]
                        ; Outside the plot, so it can't cover any bars.
                        [plot-legend-anchor 'outside-right-top])
-          (plot-file (render-benchmark-alts (list (if racket? racket-json (car (first parsers))))
+          (plot-file (render-benchmark-alts (list (or baseline (car (first parsers))))
                                             results
                                             #:format-opts car
-                                            #:normalize? racket?)
+                                            #:normalize? (and baseline #t))
                      (car plot)
                      (cdr plot)
                      #:title "string->json"
                      #:x-label #f
                      #:y-label (string-append
-                                (if racket?
-                                    (format "time relative to ~a" racket-json)
+                                (if baseline
+                                    (format "time relative to ~a" baseline)
                                     "mean ms")
                                 (if log-scale? ", log scale" ""))
                      #:y-min (and log-scale? (/ (apply min bars) 2))
@@ -204,37 +213,40 @@
                      #:width 1200)))
       (printf "\nplot written to ~a\n" (car plot)))))
 
-; [Listof benchmark-result] Boolean Boolean -> Void
+; [Listof benchmark-result] (U String #f) -> Void
 ; Prints each result's mean and 95% confidence interval, computed as the
-; plots from render-benchmark-alts compute theirs. With `parsers?`, it
-; also names the parser of each result, and with `racket?`, it shows each
-; mean relative to Racket's JSON parser's on the same input.
-(define (print-table results parsers? racket?)
-  (let* ([mean-of (lambda (r) (mean (benchmark-result-trial-times r)))]
-         [racket-means (for/hash ([r (in-list results)]
-                                  #:when (equal? (benchmark-result-opts r) (list racket-json)))
-                         (values (benchmark-result-name r) (mean-of r)))]
-         ; Each column is (list header alignment [benchmark-result -> String]).
+; plots from render-benchmark-alts compute theirs. With a `baseline`
+; parser's label, it also names the parser of each result and shows each
+; mean relative to the baseline's on the same input.
+(define (print-table results baseline)
+  (let* (; Each column is (list header alignment [benchmark-result -> String]).
          [columns
           (append
            (list (list "input" 'left benchmark-result-name))
-           (if parsers?
+           (if baseline
                (list (list "parser" 'left (lambda (r) (car (benchmark-result-opts r)))))
                '())
-           (list (list "mean ms" 'right (lambda (r) (~r (mean-of r) #:precision '(= 2))))
+           (list (list "mean ms" 'right (lambda (r) (~r (mean-time r) #:precision '(= 2))))
                  (list "± ms" 'right
                        (lambda (r)
                          (let ([times (benchmark-result-trial-times r)])
                            (~r (* 1.96 (/ (stddev times) (sqrt (length times))))
                                #:precision '(= 2))))))
-           (if racket?
-               (list (list (format "vs ~a" racket-json) 'right
-                           (lambda (r)
-                             (let ([base (hash-ref racket-means (benchmark-result-name r))])
-                               (if (zero? base)
-                                   "-"
-                                   (string-append (~r (/ (mean-of r) base) #:precision '(= 1))
-                                                  "x"))))))
+           (if baseline
+               (let ([relative (relative-to results baseline)])
+                 (list (list (format "vs ~a" baseline) 'right
+                             (lambda (r)
+                               (let ([x (relative r)])
+                                 (if x
+                                     ; Two significant figures below 1x, so
+                                     ; a parser 40 times faster isn't 0.0x.
+                                     (string-append
+                                      (~r x #:precision
+                                          (list '= (if (< 0 x 1)
+                                                       (- 1 (exact-floor (log x 10)))
+                                                       1)))
+                                      "x")
+                                     "-"))))))
                '()))]
          [rows (cons (map car columns)
                      (for/list ([r (in-list results)])
@@ -288,6 +300,7 @@
 (module+ main
   (define racket? #f)
   (define merge? #f)
+  (define vs #f)
   (define trials 30)
   (define sizes '(4000 8000 16000))
   (define plot #f)
@@ -295,10 +308,12 @@
   (define refs
     (command-line
      #:once-each
-     [("--racket") "Also benchmark Racket's own JSON parser, string->jsexpr, and compare against it"
+     [("--racket") "Also benchmark Racket's own JSON parser, string->jsexpr, as the parser racket"
                    (set! racket? #t)]
      [("--merge") "Also benchmark a merge of each combination of the refs, skipping any that conflict"
                   (set! merge? #t)]
+     [("--vs") parser "Show times relative to parser's, a ref, a merge such as a+b, or racket (default racket if benchmarked, else the first ref)"
+               (set! vs parser)]
      [("--trials") n "Times to run each benchmark (default 30)"
                    (set! trials (positive-integer "--trials" n))]
      [("--sizes") ns "Comma-separated input sizes in characters (default 4000,8000,16000)"
@@ -314,6 +329,20 @@
     (raise-user-error 'bench "--merge needs at least two refs to merge"))
   (when (and log-scale? (not plot))
     (raise-user-error 'bench "--log-scale needs --plot"))
-  (call-with-checkouts refs merge?
-                       (lambda (checkouts)
-                         (bench checkouts racket? trials sizes plot log-scale?))))
+  (call-with-checkouts
+   refs merge?
+   (lambda (checkouts)
+     ; Racket's parser, if any, is first, to be the default --vs.
+     (let ([parsers (append (if racket? (list (cons "racket" string->jsexpr)) '())
+                            (for/list ([c (in-list checkouts)])
+                              (cons (car c)
+                                    (dynamic-require (build-path (cdr c) "json.rkt")
+                                                     'string->json))))])
+       (when (and vs (not (assoc vs parsers)))
+         (raise-user-error 'bench "--vs ~a isn't a benchmarked parser; use one of ~a"
+                           vs
+                           (string-join (map car parsers) ", ")))
+       ; With one parser, there's nothing to compare it to.
+       (bench parsers
+              (and (> (length parsers) 1) (or vs (car (first parsers))))
+              trials sizes plot log-scale?)))))

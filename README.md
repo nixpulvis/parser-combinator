@@ -94,12 +94,16 @@ worktree, for example to check a branch for regressions against `master`.
 `--merge` also benchmarks a merge of each combination of the refs, to see how
 branches perform together before they're merged. Combinations that conflict, or
 that merge to the same code as one already benchmarked, are skipped. `--racket`
-also benchmarks Racket's own JSON parser, `string->jsexpr`, and shows each time
-relative to its. `--plot` also writes a plot of the times, and `--log-scale` puts
-it on a log scale, so a much slower ref doesn't flatten the others. See
-`scripts/bench.rkt --help` for the other options.
+also benchmarks Racket's own JSON parser, `string->jsexpr`, as the parser
+`racket`. With more than one parser, each time is also shown relative to the
+parser named by `--vs`: a ref, a merge such as `my-branch+other-branch`, or
+`racket`. It defaults to `racket` when that's benchmarked, and otherwise to the
+first ref. `--plot` also writes a plot of the times, normalized the same way,
+and `--log-scale` puts it on a log scale, so a much slower ref doesn't flatten
+the others. See `scripts/bench.rkt --help` for the other options.
 
 ```sh
 scripts/bench.rkt --plot bench.png master my-branch
 scripts/bench.rkt --merge my-branch other-branch
+scripts/bench.rkt --racket --vs master master my-branch
 ```
