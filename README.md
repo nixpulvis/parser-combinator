@@ -2,6 +2,8 @@
 
 Simple Racket parser library, and default (tested) JSON implementation.
 
+Read the [documentation](https://nixpulvis.com/parser-combinator/).
+
 ## Install
 
 ```sh
