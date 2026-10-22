@@ -110,3 +110,11 @@ scripts/bench.rkt --plot bench.png master my-branch
 scripts/bench.rkt --merge my-branch other-branch
 scripts/bench.rkt --racket --vs master master my-branch
 ```
+
+On `master` as of 2026-10-22, against Racket's parser.
+
+```sh
+scripts/bench.rkt --racket --vs racket --plot bench-racket-2026-10-22.svg
+```
+
+![string->json times relative to string->jsexpr](bench-racket-2026-10-22.svg)
