@@ -2,25 +2,48 @@
 #lang racket/base
 ; Benchmarks string->json at git refs against each other, and optionally
 ; against Racket's own JSON parser, string->jsexpr, using the benchmark
-; package.
+; package, which isn't a dependency of this package:
+;
+;   raco pkg install --auto --skip-installed benchmark
 ;
 ;   scripts/bench.rkt [--racket] [--merge] [--vs PARSER]
-;                     [--trials N] [--sizes N,...]
+;                     [--group GROUP]... [--trials N] [--sizes N,...]
 ;                     [--plot FILE [--log-scale]] [ref ...]
 ;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
-; benchmarked from a temporary worktree. With no refs, the working tree is
-; benchmarked. With --merge, so is a merge of each combination of the
-; refs. With --racket, so is string->jsexpr, as the parser "racket". When
-; there's more than one parser, times are also shown relative to the --vs
-; parser's, or else to racket's, or else to the first ref's. The plot shows
-; mean ms, unless --vs is given, when it shows times relative to its parser's.
+; benchmarked from a temporary worktree, for example to check a branch for
+; regressions against master. With no refs, the working tree is
+; benchmarked, labeled with the tag at HEAD, or else its branch, or else its
+; abbreviated commit hash. With --merge, so is a merge of each combination
+; of the refs, to see how branches perform together before they're merged;
+; combinations that conflict, or that merge to the same code as one already
+; benchmarked, are skipped. With --racket, so is string->jsexpr, as the
+; parser "racket".
+;
+; When there's more than one parser, times are also shown relative to the
+; --vs parser's: a ref, a merge such as my-branch+other-branch, or racket.
+; It defaults to racket if that's benchmarked, or else to the first ref.
+; --plot also writes a plot of the mean ms, or, with --vs, of the times
+; relative to its parser's. --log-scale puts the plot on a log scale, so a
+; much slower parser doesn't flatten the rest.
+;
+; Each --group picks a group of inputs: generated, JSON of a few shapes made
+; at each of the --sizes, or fixtures, the JSON files in tests/fixtures.
+; With no --group, the inputs are every group's.
+;
+;   scripts/bench.rkt --group fixtures
+;   scripts/bench.rkt --plot bench.png master my-branch
+;   scripts/bench.rkt --merge my-branch other-branch
+;   scripts/bench.rkt --racket --vs master master my-branch
 (require benchmark
          math/statistics
          plot
+         racket/file
          racket/format
          racket/list
          racket/math
+         racket/path
+         racket/runtime-path
          racket/string)
 
 ; A Parser is a (cons String [String -> Any]), a label and a function that
@@ -28,13 +51,13 @@
 
 (module+ main
   (require json
-           racket/cmdline
-           racket/path)
+           racket/cmdline)
   (define racket? #f)
   (define merge? #f)
   (define vs #f)
+  (define group-names '())
   (define trials 30)
-  (define sizes '(4000 8000 16000))
+  (define sizes #f)
   (define plot #f)
   (define log-scale? #f)
   ; String -> Path
@@ -64,19 +87,37 @@
                (set! vs parser)]
      [("--trials") n "Times to run each benchmark (default 30)"
                    (set! trials (positive-integer "--trials" n))]
-     [("--sizes") ns "Comma-separated input sizes in characters (default 4000,8000,16000)"
+     [("--sizes") ns "Comma-separated input sizes in characters for the generated group (default 4000,8000,16000)"
                   (set! sizes (for/list ([s (in-list (string-split ns ","))])
                                 (positive-integer "--sizes" s)))]
      [("--plot") file "Also plot the times to file, such as a .png, .svg, or .pdf"
                  (set! plot (plot-path file))]
      [("--log-scale") "Plot the times on a log scale, so a much slower parser doesn't flatten the rest"
                       (set! log-scale? #t)]
+     #:multi
+     [("--group") group "Benchmark the inputs of group, generated or fixtures, which can be given more than once (default all groups)"
+                  (unless (assoc group groups)
+                    (raise-user-error 'bench "--group ~a isn't a group; use one of ~a"
+                                      group
+                                      (string-join (map car groups) ", ")))
+                  (set! group-names (append group-names (list group)))]
      #:args refs
      refs))
+  (when (null? group-names)
+    (set! group-names (map car groups)))
+  (when (and sizes (not (member "generated" group-names)))
+    (raise-user-error 'bench "--sizes needs --group generated"))
   (when (and merge? (< (length refs) 2))
     (raise-user-error 'bench "--merge needs at least two refs to merge"))
   (when (and log-scale? (not plot))
     (raise-user-error 'bench "--log-scale needs --plot"))
+  ; Inputs are made before any checkout, so a missing fixture fails early.
+  ; Inputs with the same name have the same text, so only one is kept.
+  (define inputs
+    (remove-duplicates
+     (append-map (lambda (g) ((cdr (assoc g groups)) (or sizes '(4000 8000 16000))))
+                 group-names)
+     #:key car))
   (call-with-checkouts
    refs merge?
    (lambda (checkouts)
@@ -92,41 +133,58 @@
                            (string-join (map car parsers) ", ")))
        ; With one parser, there's nothing to compare it to.
        (let ([baseline (and (> (length parsers) 1) (or vs (car (first parsers))))])
-         (bench parsers baseline (and baseline vs #t) trials sizes plot log-scale?))))))
+         (bench parsers baseline (and baseline vs #t) trials inputs plot log-scale?))))))
 
-; [Listof Parser] (U String #f) Boolean Natural [Listof Natural] (U Path #f) Boolean -> Void
-; Benchmarks each parser, printing the results, and plotting them too if
-; there's a `plot`. With a `baseline`, the label of one of the parsers,
-; times are also shown relative to its, and plotted relative to its if
-; `plot-relative?`. With `log-scale?`, the plot's y-axis is a log scale.
-(define (bench parsers baseline plot-relative? trials sizes plot log-scale?)
-  (let* (; Inputs are made before timing starts. A What is (list case size),
-         ; and names the input `inputs` maps it to.
-         [whats (for*/list ([c (in-list cases)] [n (in-list sizes)])
-                  (list (car c) n))]
-         [inputs (for/hash ([w (in-list whats)])
-                   (values w ((cdr (assoc (car w) cases)) (cadr w))))]
-         [what-name (lambda (w)
-                      (format "~a ~a" (car w) (string-length (hash-ref inputs w))))]
-         [parse-with (lambda (w label)
-                       ((cdr (assoc label parsers)) (hash-ref inputs w)))]
+; [Listof Parser] (U String #f) Boolean Natural [Listof Input] (U Path #f) Boolean -> Void
+; Benchmarks each parser on each input, printing the results, and plotting
+; them too if there's a `plot`. With a `baseline`, the label of one of the
+; parsers, times are also shown relative to its, and plotted relative to its
+; if `plot-relative?`. With `log-scale?`, the plot's y-axis is a log scale.
+(define (bench parsers baseline plot-relative? trials inputs plot log-scale?)
+  (let* ([texts (make-immutable-hash inputs)]
+         [parse-with (lambda (name label)
+                       ((cdr (assoc label parsers)) (hash-ref texts name)))]
          [results
           (run-benchmarks
-           whats
+           (map car inputs)
            (list (map car parsers))
            parse-with
            ; Not timed: runs once before each benchmark's trials, to check
            ; that the parser accepts the input and to warm it up.
-           #:build (lambda (w label)
-                     (eprintf "~a, ~a\n" (what-name w) label)
-                     (parse-with w label)
+           #:build (lambda (name label)
+                     (eprintf "~a, ~a\n" name label)
+                     (parse-with name label)
                      (collect-garbage))
            #:extract-time 'delta-time
            #:num-trials trials
-           #:make-name what-name)])
+           #:make-name values)])
     (print-table results baseline)
     (when plot
       (plot-results results (and plot-relative? baseline) plot log-scale?))))
+
+; An Input is a (cons String String), a JSON text's name and the text. The
+; name is a description of the text and its length in characters.
+
+; String String -> Input
+(define (input description text)
+  (cons (format "~a ~a" description (string-length text)) text))
+
+; A Group is a (cons String [[Listof Natural] -> [Listof Input]]), a name
+; and a function that makes the group's inputs, given the --sizes.
+(define groups
+  (list (cons "generated"
+              (lambda (sizes)
+                (for*/list ([c (in-list cases)] [n (in-list sizes)])
+                  (input (car c) ((cdr c) n)))))
+        (cons "fixtures"
+              (lambda (sizes)
+                (for/list ([file (in-list (directory-list fixtures))]
+                           #:when (path-has-extension? file #".json"))
+                  (input (path->string (path-replace-extension file #""))
+                         (file->string (build-path fixtures file))))))))
+
+; Real-world JSON files, shared with the tests.
+(define-runtime-path fixtures "../tests/fixtures")
 
 ; A Case is a (cons String [Natural -> String]), a name and a function
 ; that makes a JSON text of about the given size.
@@ -219,6 +277,9 @@
          [y-min (and log-scale? (/ (apply min bars) 2))]
          [y-max (and log-scale? (* (apply max bars) 2))])
     (parameterize ([plot-x-ticks no-ticks]
+                   ; Slanted, so the inputs' names don't run into each other.
+                   [plot-x-tick-label-angle 30]
+                   [plot-x-tick-label-anchor 'top-right]
                    [plot-y-transform (if log-scale? log-transform (plot-y-transform))]
                    ; With more powers of 10 in range than #:number, log-ticks
                    ; labels only every other one, so it gets enough for all.
@@ -287,7 +348,7 @@
   ; temporary worktrees that are removed afterwards. With `merge?`, each
   ; combination of the refs is checked out instead, each ref on its own and
   ; every merge of two or more of them. With no refs, the one checkout is
-  ; this working tree.
+  ; this working tree, labeled by head-name.
   (define (call-with-checkouts refs merge? proc)
     ; Path [Listof [Listof String]] -> [Listof (cons String Path)]
     ; Checks out each list of refs into a worktree in `tmp`, merging the rest
@@ -323,7 +384,7 @@
                    (values (cons (cons label (string->path dir)) checkouts)
                            (hash-set labels-by-tree tree label))])))))
     (if (empty? refs)
-        (proc (list (cons "working tree" root)))
+        (proc (list (cons (head-name) root)))
         (let ([tmp (make-temporary-directory "bench~a")])
           (dynamic-wind
            void
@@ -337,6 +398,16 @@
              (for ([dir (in-list (directory-list tmp #:build? #t))])
                (git root "worktree" "remove" "--force" (path->string dir)))
              (delete-directory/files tmp))))))
+
+  ; -> String
+  ; Names this working tree's HEAD: a tag pointing at it, or else its
+  ; branch, or else its abbreviated commit hash.
+  (define (head-name)
+    (let-values ([(tag? tag) (git? root "describe" "--tags" "--exact-match" "HEAD")]
+                 [(branch? branch) (git? root "symbolic-ref" "--quiet" "--short" "HEAD")])
+      (string-trim (cond [tag? tag]
+                         [branch? branch]
+                         [else (git root "rev-parse" "--short" "HEAD")]))))
 
   ; Path-String String ... -> String
   ; Runs git in `dir`, returning what it printed, or raising a user error if

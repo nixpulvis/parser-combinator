@@ -75,40 +75,24 @@ Run all of the tests.
 raco test tests
 ```
 
+The JSON tests also parse the real-world JSON files in `tests/fixtures`, and
+check that `string->json` agrees with Racket's own parser, `string->jsexpr`.
+They're `canada.json` (GeoJSON, mostly numbers), `citm_catalog.json` (objects
+and short strings), and `twitter.json` (non-ASCII text), from
+[nativejson-benchmark](https://github.com/miloyip/nativejson-benchmark), under
+its MIT license in `tests/fixtures/LICENSE`.
+
 ## Benchmarks
 
-The benchmarks time `string->json` on generated JSON of a few shapes and sizes.
-They require the [`benchmark`](https://pkgs.racket-lang.org/package/benchmark)
-package, which isn't a dependency of this package.
+`scripts/bench.rkt` times `string->json`, at git refs against each other and
+against Racket's own parser. It requires the
+[`benchmark`](https://pkgs.racket-lang.org/package/benchmark) package, which
+isn't a dependency of this package. The comment at the top of the script
+documents its options.
 
 ```sh
 raco pkg install --auto --skip-installed benchmark
-```
-
-Benchmark the working tree.
-
-```sh
 scripts/bench.rkt
-```
-
-Name git refs to compare them instead, each checked out into a temporary
-worktree, for example to check a branch for regressions against `master`.
-`--merge` also benchmarks a merge of each combination of the refs, to see how
-branches perform together before they're merged. Combinations that conflict, or
-that merge to the same code as one already benchmarked, are skipped. `--racket`
-also benchmarks Racket's own JSON parser, `string->jsexpr`, as the parser
-`racket`. With more than one parser, each time is also shown relative to the
-parser named by `--vs`: a ref, a merge such as `my-branch+other-branch`, or
-`racket`. It defaults to `racket` when that's benchmarked, and otherwise to the
-first ref. `--plot` also writes a plot of the mean times in ms, or, with
-`--vs`, of the times relative to its parser's. `--log-scale` puts it on a log
-scale, so a much slower ref doesn't flatten the others. See
-`scripts/bench.rkt --help` for the other options.
-
-```sh
-scripts/bench.rkt --plot bench.png master my-branch
-scripts/bench.rkt --merge my-branch other-branch
-scripts/bench.rkt --racket --vs master master my-branch
 ```
 
 On `master` as of 2026-10-22, against Racket's parser.

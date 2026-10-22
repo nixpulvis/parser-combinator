@@ -1,5 +1,7 @@
 #lang racket
 (require test-engine/racket-tests)
+(require racket/runtime-path)
+(require (only-in json string->jsexpr))
 (require "../parse.rkt")
 (require "../json.rkt")
 
@@ -286,5 +288,35 @@ HERE
 }
 HERE
 )) true)
+
+; Fixture tests
+; Each file in fixtures/ is real-world JSON from nativejson-benchmark, and
+; parses to the same value as with Racket's own parser, string->jsexpr.
+(define-runtime-path fixtures "fixtures")
+
+; String -> Boolean
+; Whether string->json and string->jsexpr agree on the fixture `name`.
+(define (same-as-racket? name)
+  (let ([text (file->string (build-path fixtures name))])
+    (same-json? (string->json text) (string->jsexpr text))))
+
+; JSON JSON -> Boolean
+; Whether `a` and `b` are the same JSON. string->jsexpr makes a number with
+; a fraction or exponent a flonum, where string->json makes it exact, so
+; numbers are the same if they're the same as flonums.
+(define (same-json? a b)
+  (cond [(and (number? a) (number? b))
+         (= (real->double-flonum a) (real->double-flonum b))]
+        [(and (list? a) (list? b))
+         (and (= (length a) (length b)) (andmap same-json? a b))]
+        [(and (hash? a) (hash? b))
+         (and (= (hash-count a) (hash-count b))
+              (for/and ([(k v) (in-hash a)])
+                (and (hash-has-key? b k) (same-json? v (hash-ref b k)))))]
+        [else (equal? a b)]))
+
+(check-expect (same-as-racket? "canada.json") true)
+(check-expect (same-as-racket? "citm_catalog.json") true)
+(check-expect (same-as-racket? "twitter.json") true)
 
 (test)
