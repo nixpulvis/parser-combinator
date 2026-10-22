@@ -27,7 +27,7 @@ jobs:
           variant: CS
           version: stable
 
-      - run: scripts/build-docs.sh
+      - run: scripts/doc.sh
 
       - uses: JamesIves/github-pages-deploy-action@v4
         with:

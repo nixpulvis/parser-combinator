@@ -56,7 +56,7 @@ raco pkg install --auto --skip-installed scribble-lib racket-doc
 Build the manual into `_site/`.
 
 ```sh
-scripts/build-docs.sh
+scripts/doc.sh
 ```
 
 ## Tests

@@ -31,7 +31,7 @@ jobs:
           variant: CS
           version: stable
 
-      - run: scripts/build-docs.sh
+      - run: scripts/doc.sh
         if: github.event.action != 'closed'
 
       - uses: rossjrw/pr-preview-action@v1
