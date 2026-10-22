@@ -71,18 +71,12 @@ Parsers are plain functions. A parser can be applied directly to a
  defines @racket[id] as a @Parser that behaves like @racket[parser-expr].
 
  Unlike @racket[define], @racket[define-parser] does not evaluate
- @racket[parser-expr] until @racket[id] is applied to a string. This lets
- a parser refer to itself. It can also refer to parsers that are defined
- later in the module. The definition
-
- @racketblock[(define-parser id parser-expr)]
-
- is equivalent to
-
- @racketblock[(define (id s) (parser-expr s))]
-
- so @racket[parser-expr] is evaluated again every time the parser
- runs.
+ @racket[parser-expr] until @racket[id] is first applied to a string.
+ This lets a parser refer to itself. It can also refer to parsers that
+ are defined later in the module. After that first application,
+ @racket[id] keeps the parser that @racket[parser-expr] produced, so
+ @racket[parser-expr] is evaluated only once, rather than every time the
+ parser runs.
 
 @examples[#:eval parse-eval
 (code:comment "Parser")
