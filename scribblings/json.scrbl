@@ -26,10 +26,10 @@ This library parses text in the JSON data exchange format into Racket
 
 A @JSON is one of:
 @itemlist[
- @item{a @racket[string?], for a JSON string}
- @item{an exact @racket[number?], for a JSON number}
- @item{a @racket[boolean?], for @tt{true} and @tt{false}}
  @item{@racket['null], for @tt{null}}
+ @item{a @racket[boolean?], for @tt{true} and @tt{false}}
+ @item{an exact @racket[number?], for a JSON number}
+ @item{a @racket[string?], for a JSON string}
  @item{a @racket[(listof #,JSON)], for a JSON array, an ordered
  collection of values}
  @item{an immutable @racket[(and/c hash-eq? (hash/c symbol? #,JSON))]
@@ -70,51 +70,39 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-grammar"]{Grammar}
 
-The grammar behind @racket[string->json] is made of the parsers below. A
- few small ones match single characters, and their @|Value|s are the
- matched characters as strings. The rest produce the @JSON itself, using
- @racket[seq] and @racket[seq*] constructors: @racket[STRING],
- @racket[NUMBER], @racket[OBJECT], and @racket[ARRAY] for those kinds of
+The grammar behind @racket[string->json] is made of the parsers below.
+ @racket[SPACE] and @racket[HEXIT] match text, and their @|Value|s are
+ the matched text. The rest produce the @JSON itself, using
+ @racket[seq] and @racket[seq*] constructors: @racket[NUMBER],
+ @racket[STRING], @racket[ARRAY], and @racket[OBJECT] for those kinds of
  value, @racket[PAIR] for one name and value in an object, and
  @racket[VALUE] for any JSON value. These parsers are exported so that
  programs can use them directly.
 
-Wherever the grammar allows whitespace around a value or a punctuation
- mark, the parsers skip any number of @racket[SPACE]s with
- @racket[unwrap].
-
-@defthing[SPACE #,Parser]{
- matches one whitespace character: a space, a tab, a newline, or a
- carriage return. The @Value is the character as a string.
+@defthing[VALUE #,Parser]{
+ matches any JSON value along with the whitespace around it. It
+ produces @racket[(quote null)], @racket[#t], or @racket[#f] for
+ @tt{null}, @tt{true}, and @tt{false}, or what @racket[NUMBER],
+ @racket[STRING], @racket[ARRAY], or @racket[OBJECT] produces.
 
 @examples[#:eval json-eval
-((star SPACE) " \t\nx")
+(parse VALUE "  null ")
+(parse VALUE "[1, true]")
 ]}
 
-@defthing[NONZERO-DIGIT #,Parser]{
- matches one non-zero digit, @tt{1} through @tt{9}. The @Value is the
- digit as a string.
+@defthing[NUMBER #,Parser]{
+ matches a JSON number: an optional @tt{-}, then either @tt{0} or a
+ non-zero digit followed by any number of digits, then an optional
+ fraction, then an optional exponent. The fraction is a @tt{.} followed
+ by one or more digits. The exponent is an @tt{e} or @tt{E}, an optional
+ @tt{+} or @tt{-}, and one or more digits.
+
+ It produces the number as an exact number.
 
 @examples[#:eval json-eval
-(parse NONZERO-DIGIT "7")
-(eval:error (parse NONZERO-DIGIT "0"))
-]}
-
-@defthing[DIGIT #,Parser]{
- matches one digit, @tt{0} through @tt{9}, using @racket[NONZERO-DIGIT]
- for the non-zero ones. The @Value is the digit as a string.
-
-@examples[#:eval json-eval
-(parse DIGIT "0")
-]}
-
-@defthing[HEXIT #,Parser]{
- matches one hexadecimal digit: a @racket[DIGIT], or a letter from
- @tt{a} through @tt{f} in either case. The @Value is the character as a
- string.
-
-@examples[#:eval json-eval
-(parse HEXIT "F")
+(parse NUMBER "7")
+(parse NUMBER "-1.5e2")
+(eval:error (parse NUMBER "1."))
 ]}
 
 @defthing[STRING #,Parser]{
@@ -132,28 +120,22 @@ Wherever the grammar allows whitespace around a value or a punctuation
 (eval:error (parse STRING "\"a\tb\""))
 ]}
 
-@defthing[NUMBER #,Parser]{
- matches a JSON number: an optional @tt{-}, then either @tt{0} or a
- @racket[NONZERO-DIGIT] followed by any number of @racket[DIGIT]s, then an
- optional fraction, then an optional exponent. The fraction is a @tt{.}
- followed by one or more @racket[DIGIT]s. The exponent is an @tt{e} or
- @tt{E}, an optional @tt{+} or @tt{-}, and one or more @racket[DIGIT]s.
-
- It produces the number as an exact number.
+@defthing[HEXIT #,Parser]{
+ matches one hexadecimal digit, @tt{0} through @tt{9} or a letter from
+ @tt{a} through @tt{f} in either case. The @Value is the character as a
+ string.
 
 @examples[#:eval json-eval
-(parse NUMBER "7")
-(parse NUMBER "-1.5e2")
-(eval:error (parse NUMBER "1."))
+(parse HEXIT "F")
 ]}
 
-@defthing[PAIR #,Parser]{
- matches one name and value in a JSON object, such as
- @tt{"name": true}, and produces a pair of the name, as a symbol, and the
- value, as produced by @racket[VALUE].
+@defthing[ARRAY #,Parser]{
+ matches a JSON array, that is, zero or more @racket[VALUE]s separated by
+ commas and surrounded by brackets. It produces the list of values, in
+ order.
 
 @examples[#:eval json-eval
-(parse PAIR "\"a\": true")
+(parse ARRAY "[true, false]")
 ]}
 
 @defthing[OBJECT #,Parser]{
@@ -166,22 +148,24 @@ Wherever the grammar allows whitespace around a value or a punctuation
 (parse OBJECT "{\"a\": 1, \"b\": 2}")
 ]}
 
-@defthing[ARRAY #,Parser]{
- matches a JSON array, that is, zero or more @racket[VALUE]s separated by
- commas and surrounded by brackets. It produces the list of values, in
- order.
+@defthing[PAIR #,Parser]{
+ matches one name and value in a JSON object, such as
+ @tt{"name": true}, and produces a pair of the name, as a symbol, and the
+ value, as produced by @racket[VALUE].
 
 @examples[#:eval json-eval
-(parse ARRAY "[true, false]")
+(parse PAIR "\"a\": true")
 ]}
 
-@defthing[VALUE #,Parser]{
- matches any JSON value along with the whitespace around it. It
- produces what @racket[STRING], @racket[NUMBER], @racket[OBJECT], or
- @racket[ARRAY] produces, or @racket[#t], @racket[#f], or
- @racket[(quote null)] for @tt{true}, @tt{false}, and @tt{null}.
+Wherever the grammar allows whitespace around a value or a punctuation
+ mark, the parsers skip an optional @racket[SPACE] with @racket[unwrap].
+
+@defthing[SPACE #,Parser]{
+ matches one or more whitespace characters: @racket[#\space],
+ @racket[#\tab], @racket[#\newline], and @racket[#\return]. The @Value
+ is the matched text.
 
 @examples[#:eval json-eval
-(parse VALUE "  null ")
-(parse VALUE "[1, true]")
+((opt SPACE) " \t\nx")
+((opt SPACE) "x")
 ]}

@@ -42,6 +42,18 @@
 (check-expect ((rx #rx"a") "")
               'error)
 
+; span tests
+(check-expect ((span char-alphabetic?) "abc123")
+              (result "abc" "123"))
+(check-expect ((span char-alphabetic?) "abc")
+              (result "abc" ""))
+(check-expect ((span char-numeric?) "abc")
+              'error)
+(check-expect ((span char-numeric?) "")
+              'error)
+(check-expect ((seq list (lit "x") (span char-numeric?)) "x42y")
+              (result (list "x" "42") "y"))
+
 ; alt tests
 (check-expect ((alt (lit "+") (lit "-")) "+123")
               (result "+" "123"))
@@ -63,6 +75,54 @@
               (result "1" "23"))
 (check-expect ((alt* (lit "+") (lit "-") (lit ".")) "123")
               'error)
+
+; switch tests
+(define PICK
+  (switch [(#\a #\b) (rx #rx"[ab]+")]
+          [(#\1) (lit "12")]
+          [else (opt (rx #rx".+"))]))
+(check-expect (PICK "abba!")
+              (result "abba" "!"))
+(check-expect (PICK "baa")
+              (result "baa" ""))
+(check-expect (PICK "12x")
+              (result "12" "x"))
+; The chosen clause failing fails switch, even though `else` would match.
+(check-expect (PICK "13")
+              'error)
+(check-expect (PICK "xyz")
+              (result "xyz" ""))
+(check-expect (PICK "")
+              (result '() ""))
+(check-expect ((seq list (lit "(") PICK) "(ab)")
+              (result (list "(" "ab") ")"))
+(check-expect ((switch [(#\a) (lit "a")]) "b")
+              'error)
+(check-expect ((switch [(#\a) (lit "a")]) "")
+              'error)
+; Clause parsers are built once, when switch is, not on every run.
+(define switch-builds 0)
+(define (counted-lit str)
+  (set! switch-builds (add1 switch-builds))
+  (lit str))
+(define COUNTED-SWITCH
+  (switch [(#\a) (counted-lit "a")]
+          [else (counted-lit "b")]))
+(check-expect (list (COUNTED-SWITCH "a") (COUNTED-SWITCH "b") (COUNTED-SWITCH "")
+                    switch-builds)
+              (list (result "a" "") (result "b" "") 'error 2))
+; A malformed clause is a syntax error, rather than expanding forever.
+; check-error doesn't catch syntax errors, so the message is compared.
+(define-namespace-anchor anchor)
+(define (switch-syntax-error clauses)
+  (with-handlers ([exn:fail:syntax? exn-message])
+    (parameterize ([current-namespace (namespace-anchor->namespace anchor)])
+      (expand `(switch ,@clauses)))))
+(check-expect (switch-syntax-error '([#\a (lit "a")]))
+              "switch: bad syntax\n  in: (switch (#\\a (lit \"a\")))")
+(check-expect (switch-syntax-error '([else (lit "b")] [(#\a) (lit "a")]))
+              (string-append "switch: bad syntax\n"
+                             "  in: (switch (else (lit \"b\")) ((#\\a) (lit \"a\")))"))
 
 ; seq tests
 (check-expect ((seq list (lit "-") (lit "+")) "-+...")
@@ -156,6 +216,13 @@
               (result (list "1" "2") ""))
 (check-expect ((star (seq list (lit "a") (lit "b"))) "abab")
               (result (list (list "a" "b") (list "a" "b")) ""))
+; star stops at a match that consumes nothing, rather than looping.
+(check-expect ((star (opt (lit "a"))) "aab")
+              (result (list "a" "a") "b"))
+(check-expect ((star (rx #rx"a*")) "aab")
+              (result (list "aa") "b"))
+(check-expect ((plus (opt (lit "a"))) "b")
+              (result (list '()) "b"))
 
 ; unwrap tests
 (check-expect ((unwrap (lit "+") (lit "!") (lit "+")) "+!+")

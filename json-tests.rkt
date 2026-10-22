@@ -3,6 +3,13 @@
 (require "parse.rkt")
 (require "json.rkt")
 
+; SPACE tests
+(check-expect (parse SPACE " \t\n\r ")
+              " \t\n\r ")
+(check-error (parse SPACE ""))
+(check-expect (parse VALUE " \t[ 1 ,\n2 ]\r\n")
+              (list 1 2))
+
 ; STRING tests
 (check-expect (parse STRING "\"Hello World\"")
               "Hello World")

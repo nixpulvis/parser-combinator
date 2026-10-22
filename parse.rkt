@@ -6,10 +6,12 @@
          emp
          lit
          rx
+         span
          seq
          seq*
          alt
          alt*
+         switch
          opt
          star
          plus
@@ -22,10 +24,11 @@
 
 ; A Value is whatever a parser produces:
 ; - `emp` produces '()
-; - `lit` and `rx` produce the matched String
+; - `lit`, `rx` and `span` produce the matched String
 ; - `seq` and `seq*` produce whatever their constructor returns,
 ;   given their parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
+; - `switch` produces the Value of the parser it chose
 ; - `opt` produces its parser's Value, or '() if its parser fails
 ; - `star` and `plus` produce the list of their parser's Values
 ; - `where` produces its parser's Value, when its condition is met
@@ -138,6 +141,20 @@
              (matched (substring s i (cdar m)) (cdar m))
              'error))))))
 
+; [Char -> Any] -> Parser
+; Matches the longest run of one or more characters that `ok?` accepts.
+; Unlike `rx`, it has no fixed cost per match, so it suits runs that are
+; often short, like whitespace.
+(define (span ok?)
+  (parser
+   (lambda (s i)
+     (let loop ([j i])
+       (if (and (< j (string-length s)) (ok? (string-ref s j)))
+           (loop (add1 j))
+           (if (= j i)
+               'error
+               (matched (substring s i j) j)))))))
+
 ; Symbol Any Natural -> Void
 ; Raises an error for `who` unless `build` is a constructor that accepts
 ; `n` Values.
@@ -185,23 +202,50 @@
       p
       (alt p (apply alt* ps))))
 
+; (switch [(Char ...) Parser] ...) : Parser
+; (switch [(Char ...) Parser] ... [else Parser]) : Parser
+; Looks at the next character without consuming it, and runs only the
+; parser of the clause that lists it, or the `else` parser if no clause
+; does or there is no character left. If the chosen parser fails, so
+; does `switch`, without trying any other clause. That is like `alt`
+; for alternatives that can only start with the characters listed for
+; them, and costs one `case` instead of trying each alternative in turn.
+; Like the other combinators, it evaluates its parser expressions once,
+; when it is made, rather than every time it runs.
+(define-syntax (switch stx)
+  (syntax-case stx (else)
+    [(_ [(c ...) p] ... [else q])
+     (with-syntax ([(t ...) (generate-temporaries #'(p ...))])
+       #'(let ([t p] ... [otherwise q])
+           (parser
+            (lambda (s i)
+              (if (< i (string-length s))
+                  (case (string-ref s i)
+                    [(c ...) (run t s i)] ...
+                    [else (run otherwise s i)])
+                  (run otherwise s i))))))]
+    [(_ [(c ...) p] ...)
+     ; Without an `else`, a character no clause lists fails. Any other
+     ; shape, such as a misplaced `else`, matches neither rule and is a
+     ; syntax error, rather than being expanded again forever.
+     #'(switch [(c ...) p] ... [else (parser (lambda (s i) 'error))])]))
+
 ; Parser -> Parser
 (define (opt p)
   (alt p (emp)))
 
-; TODO: Stop when `p` matches without consuming input. Today a parser
-; that can match the empty string, such as `(opt p)` or `(rx #rx"a*")`,
-; makes `star` loop forever once it matches before the end of the input.
 ; Parser -> Parser
+; Stops when `p` fails, or matches without consuming input, which would
+; otherwise repeat forever. The parser is built once, and refers to
+; itself for each further match.
 (define (star p)
-  (parser
-   (lambda (s i)
-     (run (alt (seq cons p (parser (lambda (s i)
-                                     (if (= i (string-length s))
-                                         (matched '() i)
-                                         (run (star p) s i)))))
-               (emp))
-          s i))))
+  (letrec ([step (parser
+                  (lambda (s i)
+                    (let ([m (run p s i)])
+                      (if (and (matched? m) (> (matched-end m) i)) m 'error))))]
+           [self (alt (seq cons step (parser (lambda (s i) (run self s i))))
+                      (emp))])
+    self))
 
 ; Parser -> Parser
 (define (plus p)

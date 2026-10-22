@@ -37,11 +37,13 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  this library produce plain Racket values:
 @itemlist[
  @item{@racket[emp] produces @racket['()]}
- @item{@racket[lit] and @racket[rx] produce the matched text, a string}
+ @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
+ text, a string}
  @item{@racket[seq] and @racket[seq*] produce whatever their
  constructor returns, given their parsers' @|Value|s}
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
  that matched}
+ @item{@racket[switch] produces the @Value of the parser it chose}
  @item{@racket[opt] produces its parser's @Value, or @racket['()] if its
  parser fails}
  @item{@racket[star] and @racket[plus] produce the list of their
@@ -149,6 +151,25 @@ The parsers made by this library pass positions in the input to one
 ((rx #rx"a|b") "xb")
 ]}
 
+@defproc[(span [ok? (-> char? any/c)]) #,Parser]{
+ produces a @Parser that matches the longest run of one or more
+ characters at the start of its input that @racket[ok?] accepts. It
+ fails if the first character isn't accepted, or if there is no input
+ left. The @Value is the matched text.
+
+@examples[#:eval parse-eval
+((span char-alphabetic?) "abc123")
+((span char-numeric?) "abc")
+]
+
+ A @racket[span] matches the same text as an @racket[rx] for a character
+ class, such as @racket[(rx #rx"[a-z]+")], but costs less when the runs
+ are short. Matching a regexp against a string has a cost every time,
+ even when it matches one character or none, and @racket[span] only
+ checks characters. Because it always takes the longest run, it can't
+ match a fixed number of characters, which takes an @racket[rx] such as
+ @racket[(rx #px"[0-9]{4}")].}
+
 @; -----------------------------------------------------------------------------
 @section[#:tag "combinator"]{Combinators}
 
@@ -224,6 +245,40 @@ The parsers made by this library pass positions in the input to one
 ((alt* (lit "x") (lit "y") (lit "z")) "zebra")
 ]}
 
+@defform[#:literals (else)
+         (switch [(char ...) parser-expr] ...
+                 maybe-else)
+         #:grammar ([maybe-else (code:line)
+                                [else else-expr]])]{
+ produces a @Parser that looks at the next character of its input without
+ consuming it, and runs only the parser of the clause that lists that
+ character. If no clause lists it, or no input is left, it runs the
+ @racket[else] parser, or fails if there is none. Each @racket[char] is
+ a character, and each @racket[parser-expr] and @racket[else-expr]
+ produces a @|Parser|. They are evaluated once, when the
+ @racket[switch] form is, not every time the parser runs. The @Value
+ is the chosen parser's.
+
+@examples[#:eval parse-eval
+(define SIGNED
+  (switch [(#\+ #\-) (rx #px"[+-]\\d+")]
+          [else (rx #px"\\d+")]))
+(SIGNED "-12")
+(SIGNED "12")
+]
+
+ Unlike @racket[alt], @racket[switch] commits to the clause it
+ chooses. If that parser fails, so does @racket[switch], without
+ trying any other clause. It behaves like @racket[alt*] when each
+ alternative can only start with the characters listed for it, and then
+ it costs one @racket[case] on the next character, instead of trying
+ each alternative in turn.
+
+@examples[#:eval parse-eval
+((alt (lit "ab") (lit "ac")) "ac")
+((switch [(#\a) (lit "ab")] [else (lit "ac")]) "ac")
+]}
+
 @defproc[(opt [p #,Parser]) #,Parser]{
  produces a @Parser that behaves like @racket[p] if @racket[p] matches,
  and otherwise succeeds without consuming input, producing
@@ -246,9 +301,13 @@ The parsers made by this library pass positions in the input to one
 
  Like @racket[alt], @racket[star] never gives back a match, so
  @racket[(seq list (star (lit "a")) (lit "a"))] matches nothing at
- all. A parser @racket[p] that can succeed without consuming input, such
- as @racket[(opt _q)], makes @racket[(star p)] loop forever once
- @racket[p] matches the empty string before the end of the input.}
+ all. It stops at the first match of @racket[p] that consumes no input,
+ leaving that match out, so a @racket[p] that can match the empty string,
+ such as @racket[(opt _q)], can't make it repeat forever.
+
+@examples[#:eval parse-eval
+((star (opt (lit "a"))) "aab")
+]}
 
 @defproc[(plus [p #,Parser]) #,Parser]{
  produces a @Parser that matches @racket[p] one or more times. The @Value
