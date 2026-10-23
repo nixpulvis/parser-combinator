@@ -39,16 +39,22 @@
 ; -------------------------------------
 
 ; Parser
-; The first character of a value says what kind it is, so `switch`
-; runs only that kind's parser, rather than each being tried in turn.
+; Matches a value with any whitespace around it. As in JSON's grammar,
+; the whitespace between tokens belongs to the values, so it's looked
+; for once: a value skips the whitespace on both sides, and the
+; punctuation around it skips none. The first character of a value says
+; what kind it is, so `switch` runs only that kind's parser, rather than
+; each being tried in turn.
 (define-parser VALUE
-  (spacey (switch [(#\n) (seq (const 'null) (lit "null"))]
+  (unwrap SKIP-SPACE
+          (switch [(#\n) (seq (const 'null) (lit "null"))]
                   [(#\t) (seq (const true) (lit "true"))]
                   [(#\f) (seq (const false) (lit "false"))]
                   [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
                   [(#\") STRING]
                   [(#\[) ARRAY]
-                  [(#\{) OBJECT])))
+                  [(#\{) OBJECT])
+          SKIP-SPACE))
 
 ; Parser
 (define-parser NUMBER
@@ -174,35 +180,49 @@
   (not (or (char=? c #\") (char=? c #\\) (char<? c #\space))))
 
 ; Parser
+; Matches an array with any whitespace around it. Inside a value, the
+; value has already skipped the whitespace before it, so that skip finds
+; none.
 (define-parser ARRAY
-  (unwrap (spacey (lit "["))
-          (comma-separated VALUE)
-          (spacey (lit "]"))))
+  (seq (lambda (space open vs close space2) vs)
+       SKIP-SPACE
+       (lit "[")
+       (comma-separated VALUE)
+       (lit "]")
+       SKIP-SPACE))
 
 ; Parser
+; Matches an object with any whitespace around it, as for `ARRAY`.
 (define-parser OBJECT
-  (seq (lambda (open pairs close)
+  (seq (lambda (space open pairs close space2)
          (for/hasheq ([pair (in-list pairs)])
            (values (car pair) (cdr pair))))
-       (spacey (lit "{"))
+       SKIP-SPACE
+       (lit "{")
        (comma-separated PAIR)
-       (spacey (lit "}"))))
+       (lit "}")
+       SKIP-SPACE))
 
 ; Parser
+; Matches a pair with any whitespace around it.
 (define-parser PAIR
-  (seq (lambda (name colon value) (cons (string->symbol name) value))
+  (seq (lambda (space name space2 colon value)
+         (cons (string->symbol name) value))
+       SKIP-SPACE
        STRING
-       (spacey (lit ":"))
+       SKIP-SPACE
+       (lit ":")
        VALUE))
 
 ; Parser -> Parser
-; Matches zero or more `p`s separated by commas, producing the list of
-; their values.
+; Matches one or more `p`s separated by commas, producing the list of
+; their values, or only whitespace, producing '() as `SKIP-SPACE` does.
+; Each `p` skips the whitespace around itself, so the commas don't.
 (define (comma-separated p)
   (alt (seq cons
             p
-            (star (seq (lambda (comma x) x) (spacey (lit ",")) p)))
-       (emp)))
+            (star (seq (lambda (comma x) x) (lit ",") p)))
+       SKIP-SPACE))
 
 ; Parser
 ; Matches one or more whitespace characters.
@@ -223,7 +243,3 @@
 ; Char -> Boolean
 (define (json-space? c)
   (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
-
-; Parser -> Parser
-(define (spacey l)
-  (unwrap SKIP-SPACE l SKIP-SPACE))
