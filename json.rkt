@@ -112,10 +112,10 @@
                           (arithmetic-shift (- high first-high-surrogate)
                                             surrogate-bits)
                           (- low first-low-surrogate)))))
-            (where CODE-UNIT high-surrogate?)
+            (where high-surrogate? CODE-UNIT)
             (seq (lambda (backslash low) low)
                  (lit "\\")
-                 (where CODE-UNIT low-surrogate?)))
+                 (where low-surrogate? CODE-UNIT)))
        (seq (lambda (n)
               (string (if (surrogate? n)
                           replacement-character

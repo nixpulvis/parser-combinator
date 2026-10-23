@@ -280,9 +280,9 @@
 (define (plus p)
   (seq cons p (star p)))
 
-; Parser [Value -> Any] -> Parser
+; [Value -> Any] Parser -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
-(define (where p ok?)
+(define (where ok? p)
   (parser
    (lambda (s i)
      (let ([m (run p s i)])
