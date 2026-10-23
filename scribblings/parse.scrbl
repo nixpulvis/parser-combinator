@@ -334,14 +334,14 @@ The parsers made by this library pass positions in the input to one
 (eval:error (parse (plus (lit "a")) ""))
 ]}
 
-@defproc[(where [p #,Parser] [ok? (-> #,Value any/c)]) #,Parser]{
+@defproc[(where [ok? (-> #,Value any/c)] [p #,Parser]) #,Parser]{
  produces a @Parser that matches what @racket[p] matches, but only when
  @racket[ok?] accepts its @|Value|. Otherwise it fails, as if
  @racket[p] had not matched. The @Value is @racket[p]'s.
 
 @examples[#:eval parse-eval
 (define NUMBER (pmap string->number (rx #px"\\d+")))
-(define BYTE (where NUMBER byte?))
+(define BYTE (where byte? NUMBER))
 (parse BYTE "200")
 (eval:error (parse BYTE "300"))
 ]
@@ -352,7 +352,7 @@ The parsers made by this library pass positions in the input to one
  @racket[where] would be:
 
 @examples[#:label #f #:eval parse-eval
-(define (plain-where p ok?)
+(define (plain-where ok? p)
   (lambda (s)
     (let ([r (p s)])
       (if (and (result? r) (ok? (result-value r)))
