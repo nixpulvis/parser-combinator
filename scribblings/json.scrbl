@@ -163,7 +163,8 @@ The grammar behind @racket[string->json] is made of the parsers below.
 ]}
 
 Wherever the grammar allows whitespace around a value or a punctuation
- mark, the parsers skip an optional @racket[SPACE] with @racket[unwrap].
+ mark, the parsers skip any whitespace there. Unlike @racket[SPACE], they
+ don't copy the whitespace they skip.
 
 @defthing[SPACE #,Parser]{
  matches one or more whitespace characters: @racket[#\space],
