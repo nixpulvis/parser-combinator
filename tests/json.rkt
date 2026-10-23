@@ -83,6 +83,8 @@
               (cons 'foo 123))
 (check-equal? (parse PAIR "\"foo\" \t: 123")
               (cons 'foo 123))
+(check-equal? (parse PAIR " \"foo\" : 123 ")
+              (cons 'foo 123))
 
 ; ARRAY tests
 (check-equal? (parse ARRAY "[]")
@@ -106,6 +108,8 @@
 
 ; OBJECT tests
 (check-equal? (parse OBJECT "{}")
+              (hasheq))
+(check-equal? (parse OBJECT " { \n } ")
               (hasheq))
 (check-equal? (parse OBJECT "{\"foo\":\"bar\"}")
               (hasheq 'foo "bar"))
