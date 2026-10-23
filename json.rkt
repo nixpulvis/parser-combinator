@@ -51,16 +51,31 @@
                   [(#\{) OBJECT])))
 
 ; Parser
+; The value is the exact number the text names: the integer and fraction
+; digits as one integer, scaled by a power of 10.
 (define-parser NUMBER
-  (seq (lambda parts
-         (string->number (apply string-append "#e" (flatten parts))))
+  (seq (lambda (sign int frac exp)
+         (let ([n (* (digits->natural (string-append int frac))
+                     (expt 10 (- exp (string-length frac))))])
+           (if (null? sign) n (- n))))
        (opt (lit "-"))
        (alt (lit "0") DIGITS)
-       (opt (seq list (lit ".") DIGITS))
-       (opt (seq list
+       (alt (seq (lambda (dot digits) digits) (lit ".") DIGITS)
+            (lit ""))
+       (alt (seq (lambda (e sign digits)
+                   (if (equal? sign "-")
+                       (- (digits->natural digits))
+                       (digits->natural digits)))
                  (alt (lit "e") (lit "E"))
                  (opt (alt (lit "+") (lit "-")))
-                 DIGITS))))
+                 DIGITS)
+            (seq (const 0) (emp)))))
+
+; String -> Natural
+; The value of a string of decimal digits.
+(define (digits->natural str)
+  (for/fold ([n 0]) ([c (in-string str)])
+    (+ (* n 10) (- (char->integer c) (char->integer #\0)))))
 
 ; Char -> Boolean
 (define (digit? c) (char<=? #\0 c #\9))
