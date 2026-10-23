@@ -202,10 +202,15 @@
 (define-parser SPACE
   (span json-space?))
 
+; Parser
+; Matches zero or more whitespace characters, producing '(). Unlike
+; `(opt SPACE)`, it doesn't copy the whitespace it skips.
+(define SKIP-SPACE (skip " \t\n\r"))
+
 ; Char -> Boolean
 (define (json-space? c)
   (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
 
 ; Parser -> Parser
 (define (spacey l)
-  (unwrap (opt SPACE) l (opt SPACE)))
+  (unwrap SKIP-SPACE l SKIP-SPACE))
