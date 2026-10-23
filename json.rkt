@@ -42,9 +42,9 @@
 ; The first character of a value says what kind it is, so `switch`
 ; runs only that kind's parser, rather than each being tried in turn.
 (define-parser VALUE
-  (spacey (switch [(#\n) (seq* (const 'null) (lit "null"))]
-                  [(#\t) (seq* (const true) (lit "true"))]
-                  [(#\f) (seq* (const false) (lit "false"))]
+  (spacey (switch [(#\n) (seq (const 'null) (lit "null"))]
+                  [(#\t) (seq (const true) (lit "true"))]
+                  [(#\f) (seq (const false) (lit "false"))]
                   [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
                   [(#\") STRING]
                   [(#\[) ARRAY]
@@ -52,15 +52,15 @@
 
 ; Parser
 (define-parser NUMBER
-  (seq* (lambda parts
-          (string->number (apply string-append "#e" (flatten parts))))
-        (opt (lit "-"))
-        (alt (lit "0") DIGITS)
-        (opt (seq list (lit ".") DIGITS))
-        (opt (seq* list
-                   (alt (lit "e") (lit "E"))
-                   (opt (alt (lit "+") (lit "-")))
-                   DIGITS))))
+  (seq (lambda parts
+         (string->number (apply string-append "#e" (flatten parts))))
+       (opt (lit "-"))
+       (alt (lit "0") DIGITS)
+       (opt (seq list (lit ".") DIGITS))
+       (opt (seq list
+                 (alt (lit "e") (lit "E"))
+                 (opt (alt (lit "+") (lit "-")))
+                 DIGITS))))
 
 ; Char -> Boolean
 (define (digit? c) (char<=? #\0 c #\9))
@@ -74,11 +74,11 @@
 ; character at a time, so a long string doesn't cost a parser step per
 ; character.
 (define-parser STRING
-  (seq* (lambda (open pieces close) (apply string-append pieces))
-        (lit "\"")
-        (star (switch [(#\\) ESCAPE]
-                      [else (span string-char?)]))
-        (lit "\"")))
+  (seq (lambda (open pieces close) (apply string-append pieces))
+       (lit "\"")
+       (star (switch [(#\\) ESCAPE]
+                     [else (span string-char?)]))
+       (lit "\"")))
 
 ; Parser
 ; Matches an escape sequence, producing the character it stands for as a
@@ -87,7 +87,7 @@
 (define-parser ESCAPE
   ; String String -> Parser
   ; Matches the letter of an escape, producing the character it stands for.
-  (let ([escaped (lambda (letter char) (seq* (const char) (lit letter)))])
+  (let ([escaped (lambda (letter char) (seq (const char) (lit letter)))])
     (seq (lambda (backslash c) c)
          (lit "\\")
          (switch [(#\") (escaped "\"" "\"")]
@@ -116,11 +116,11 @@
             (seq (lambda (backslash low) low)
                  (lit "\\")
                  (where CODE-UNIT low-surrogate?)))
-       (seq* (lambda (n)
-               (string (if (surrogate? n)
-                           replacement-character
-                           (integer->char n))))
-             CODE-UNIT)))
+       (seq (lambda (n)
+              (string (if (surrogate? n)
+                          replacement-character
+                          (integer->char n))))
+            CODE-UNIT)))
 
 ; Parser
 ; Matches the `uXXXX` of a `\u` escape, after its backslash, producing
@@ -181,19 +181,19 @@
 
 ; Parser
 (define-parser OBJECT
-  (seq* (lambda (open pairs close)
-          (for/hasheq ([pair (in-list pairs)])
-            (values (car pair) (cdr pair))))
-        (spacey (lit "{"))
-        (comma-separated PAIR)
-        (spacey (lit "}"))))
+  (seq (lambda (open pairs close)
+         (for/hasheq ([pair (in-list pairs)])
+           (values (car pair) (cdr pair))))
+       (spacey (lit "{"))
+       (comma-separated PAIR)
+       (spacey (lit "}"))))
 
 ; Parser
 (define-parser PAIR
-  (seq* (lambda (name colon value) (cons (string->symbol name) value))
-        STRING
-        (spacey (lit ":"))
-        VALUE))
+  (seq (lambda (name colon value) (cons (string->symbol name) value))
+       STRING
+       (spacey (lit ":"))
+       VALUE))
 
 ; Parser -> Parser
 ; Matches zero or more `p`s separated by commas, producing the list of
