@@ -231,8 +231,12 @@
      #'(switch [(c ...) p] ... [else (parser (lambda (s i) 'error))])]))
 
 ; Parser -> Parser
+; Like `(alt p (emp))`, without running a second parser when `p` fails.
 (define (opt p)
-  (alt p (emp)))
+  (parser
+   (lambda (s i)
+     (let ([m (run p s i)])
+       (if (symbol? m) (matched '() i) m)))))
 
 ; Parser -> Parser
 ; Stops when `p` fails, or matches without consuming input, which would
