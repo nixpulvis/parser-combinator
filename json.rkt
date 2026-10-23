@@ -51,15 +51,36 @@
                   [(#\{) OBJECT])))
 
 ; Parser
+; The value is the exact number the text names: the integer and fraction
+; digits as one integer, scaled by a power of 10.
 (define-parser NUMBER
-  (pmap (lambda parts
-          (string->number (apply string-append "#e" (flatten parts))))
+  (pmap (lambda (sign int frac exponent)
+          (let ([n (* (digits->natural (string-append int frac))
+                      (expt 10 (- exponent (string-length frac))))])
+            (if (null? sign) n (- n))))
         (opt (lit "-"))
         (alt (lit "0") DIGITS)
-        (opt (seq (lit ".") DIGITS))
-        (opt (seq (alt (lit "e") (lit "E"))
-                  (opt (alt (lit "+") (lit "-")))
-                  DIGITS))))
+        (alt (pmap (lambda (dot digits) digits) (lit ".") DIGITS)
+             (lit ""))
+        (alt (pmap (lambda (e sign digits)
+                     (if (equal? sign "-")
+                         (- (digits->natural digits))
+                         (digits->natural digits)))
+                   (alt (lit "e") (lit "E"))
+                   (opt (alt (lit "+") (lit "-")))
+                   DIGITS)
+             (pmap (const 0) (emp)))))
+
+; String -> Natural
+; The value of a string of decimal digits. Adding up one digit at a time
+; is fastest for the short numbers JSON usually holds, but it multiplies
+; a growing number for every digit, so past 64 digits `string->number`
+; is faster.
+(define (digits->natural str)
+  (if (<= (string-length str) 64)
+      (for/fold ([n 0]) ([c (in-string str)])
+        (+ (* n 10) (- (char->integer c) (char->integer #\0))))
+      (string->number str)))
 
 ; Char -> Boolean
 (define (digit? c) (char<=? #\0 c #\9))
