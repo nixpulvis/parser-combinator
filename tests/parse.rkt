@@ -129,6 +129,12 @@
            (λ () (expand-switch '([else (lit "b")] [(#\a) (lit "a")]))))
 
 ; seq tests
+; With one parser, seq converts its Value.
+(check-equal? ((seq string->number (rx #px"\\d+")) "42!")
+              (result 42 "!"))
+(check-equal? ((seq string->number (rx #px"\\d+")) "x")
+              'error)
+; With more, it runs them in order.
 (check-equal? ((seq list (lit "-") (lit "+")) "-+...")
               (result (list "-" "+") "..."))
 (check-equal? ((seq string-append (lit "-") (lit "+")) "-+...")
@@ -137,36 +143,42 @@
               'error)
 (check-equal? ((seq list (lit "-") (lit "+")) "--...")
               'error)
+(check-equal? ((seq list (lit "-") (lit "+") (lit ".")) "-+...")
+              (result (list "-" "+" ".") ".."))
+(check-equal? ((seq (lambda (l m r) m) (lit "(") (lit "x") (lit ")")) "(x)!")
+              (result "x" "!"))
+(check-equal? ((seq list (lit "-") (lit "+") (lit ".")) "-+-")
+              'error)
+(check-equal? ((seq list (lit "a") (lit "b") (lit "c") (lit "d")) "abcde")
+              (result (list "a" "b" "c" "d") "e"))
+(check-equal? ((seq list (lit "a") (lit "b") (lit "c") (lit "d")) "abce")
+              'error)
+; The constructor must accept one Value per parser.
 (define (one a) a)
 (define (two a b) a)
+(check-exn (message-is "seq: contract violation\n"
+                       "  expected: (procedure-arity-includes/c 1)\n"
+                       "  given: #<procedure:two>")
+           (λ () (seq two (lit "-"))))
 (check-exn (message-is "seq: contract violation\n"
                        "  expected: (procedure-arity-includes/c 2)\n"
                        "  given: #<procedure:one>")
            (λ () (seq one (lit "-") (lit "+"))))
 (check-exn (message-is "seq: contract violation\n"
+                       "  expected: (procedure-arity-includes/c 3)\n"
+                       "  given: #<procedure:two>")
+           (λ () (seq two (lit "-") (lit "+") (lit "."))))
+(check-exn (message-is "seq: contract violation\n"
                        "  expected: (procedure-arity-includes/c 2)\n"
                        "  given: 'a")
            (λ () (seq 'a (lit "-") (lit "+"))))
-
-; seq* tests
-(check-equal? ((seq* list (lit "-")) "-+")
-              (result (list "-") "+"))
-(check-equal? ((seq* list (lit "-") (lit "+") (lit ".")) "-+...")
-              (result (list "-" "+" ".") ".."))
-(check-equal? ((seq* (lambda (l m r) m) (lit "(") (lit "x") (lit ")")) "(x)!")
-              (result "x" "!"))
-(check-equal? ((seq* list (lit "-") (lit "+")) "+-...")
-              'error)
-(check-equal? ((seq* list (lit "-") (lit "+") (lit ".")) "-+-")
-              'error)
-(check-exn (message-is "seq*: contract violation\n"
-                       "  expected: (procedure-arity-includes/c 3)\n"
-                       "  given: #<procedure:two>")
-           (λ () (seq* two (lit "-") (lit "+") (lit "."))))
-(check-exn (message-is "seq*: contract violation\n"
+; Used as a value, seq is a procedure.
+(check-equal? ((apply seq list (list (lit "a") (lit "b") (lit "c"))) "abcd")
+              (result (list "a" "b" "c") "d"))
+(check-exn (message-is "seq: contract violation\n"
                        "  expected: (procedure-arity-includes/c 2)\n"
-                       "  given: 'a")
-           (λ () (seq* 'a (lit "-") (lit "+"))))
+                       "  given: #<procedure:one>")
+           (λ () (apply seq one (list (lit "-") (lit "+")))))
 
 ; opt tests
 (check-equal? ((opt (lit "-")) "-123")
@@ -177,7 +189,7 @@
               (result '() ""))
 
 ; where tests
-(define NUMBER (seq* string->number (rx #px"\\d+")))
+(define NUMBER (seq string->number (rx #px"\\d+")))
 (check-equal? ((where NUMBER even?) "42!")
               (result 42 "!"))
 (check-equal? ((where NUMBER even?) "41!")

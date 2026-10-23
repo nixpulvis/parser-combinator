@@ -8,7 +8,6 @@
          rx
          span
          seq
-         seq*
          alt
          alt*
          switch
@@ -25,8 +24,8 @@
 ; A Value is whatever a parser produces:
 ; - `emp` produces '()
 ; - `lit`, `rx` and `span` produce the matched String
-; - `seq` and `seq*` produce whatever their constructor returns,
-;   given their parsers' Values
+; - `seq` produces whatever its constructor returns, given its parsers'
+;   Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
 ; - `switch` produces the Value of the parser it chose
 ; - `opt` produces its parser's Value, or '() if its parser fails
@@ -164,30 +163,60 @@
                           (format "(procedure-arity-includes/c ~a)" n)
                           build)))
 
-; (Value Value -> Value) Parser Parser -> Parser
-(define (seq build p1 p2)
-  (check-constructor 'seq build 2)
-  (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1)
-           'error
-           (let ([m2 (run p2 s (matched-end m1))])
-             (if (symbol? m2)
-                 'error
-                 (matched (build (matched-value m1) (matched-value m2))
-                          (matched-end m2)))))))))
+; (seq build p ...+) : Parser
+; where build : (Value ... -> Value), with one argument per parser
+; Runs the parsers in order, each from where the last one's match ended,
+; and calls `build` with their Values. With one parser, `seq` converts
+; its Value. A call to `seq` expands to code for its number of parsers,
+; which calls `build` directly, so no list of the Values is made. Used as
+; a value, such as with `apply`, `seq` is the procedure `seq-procedure`,
+; which collects the Values in a list instead. Like a procedure, `seq`
+; evaluates `build` and the parsers once, in order, when it is made.
+(define-syntax (seq stx)
+  (syntax-case stx ()
+    [(_ build p0 p ...)
+     (with-syntax ([(t ...) (generate-temporaries #'(p0 p ...))]
+                   [n (length (syntax->list #'(p0 p ...)))])
+       ; Binding through `values` keeps a `lambda` given as `build` or as a
+       ; parser from being named after the temporary it's bound to.
+       #'(let-values ([(b t ...) (values build p0 p ...)])
+           (check-constructor 'seq b n)
+           (parser (lambda (s i) (seq-steps s i b () (t ...))))))]
+    [(_ . args) #'(seq-procedure . args)]
+    [_ (identifier? stx) #'seq-procedure]))
 
-; (Value ... -> Value) Parser Parser ... -> Parser
-; The constructor gets one Value per parser, collected into a list by
-; nesting `seq` with `cons`.
-(define (seq* build p . ps)
-  (check-constructor 'seq* build (add1 (length ps)))
-  (seq (lambda (v vs) (apply build v vs))
-       p
-       (foldr (lambda (p rest) (seq cons p rest))
-              (emp)
-              ps)))
+; (seq-steps s i build (v ...) (p ...)) : Match
+; Runs each `p` in order from position `i` of `s`, and then calls
+; `build` with the Values `v ...` followed by theirs.
+(define-syntax seq-steps
+  (syntax-rules ()
+    [(_ s i build (v ...) ())
+     (matched (build v ...) i)]
+    [(_ s i build (v ...) (p rest ...))
+     (let ([m (run p s i)])
+       (if (symbol? m)
+           'error
+           (let ([x (matched-value m)] [j (matched-end m)])
+             (seq-steps s j build (v ... x) (rest ...)))))]))
+
+; (Value ... -> Value) Parser ... -> Parser
+; `seq` as a procedure, for when it isn't called directly.
+(define seq-procedure
+  (let ([seq (lambda (build p . ps)
+               (check-constructor 'seq build (add1 (length ps)))
+               (let ([all (cons p ps)])
+                 (parser
+                  (lambda (s i)
+                    (let loop ([ps all] [i i] [vals '()])
+                      (if (null? ps)
+                          (matched (apply build (reverse vals)) i)
+                          (let ([m (run (car ps) s i)])
+                            (if (symbol? m)
+                                'error
+                                (loop (cdr ps)
+                                      (matched-end m)
+                                      (cons (matched-value m) vals))))))))))])
+    seq))
 
 ; Parser Parser -> Parser
 (define (alt p1 p2)
@@ -261,4 +290,4 @@
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
-  (seq* (lambda (l b r) b) left body right))
+  (seq (lambda (l b r) b) left body right))
