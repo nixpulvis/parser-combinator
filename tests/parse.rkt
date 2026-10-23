@@ -207,17 +207,17 @@
 
 ; where tests
 (define NUMBER (pmap string->number (rx #px"\\d+")))
-(check-equal? ((where NUMBER even?) "42!")
+(check-equal? ((where even? NUMBER) "42!")
               (result 42 "!"))
-(check-equal? ((where NUMBER even?) "41!")
+(check-equal? ((where even? NUMBER) "41!")
               'error)
-(check-equal? ((where NUMBER even?) "x")
+(check-equal? ((where even? NUMBER) "x")
               'error)
-(check-equal? ((seq (lit "#") (where NUMBER even?)) "#42!")
+(check-equal? ((seq (lit "#") (where even? NUMBER)) "#42!")
               (result (list "#" 42) "!"))
-(check-equal? ((seq (lit "#") (where NUMBER even?)) "#41!")
+(check-equal? ((seq (lit "#") (where even? NUMBER)) "#41!")
               'error)
-(check-equal? ((alt (where (lit "ab") (const #f)) (lit "a")) "abc")
+(check-equal? ((alt (where (const #f) (lit "ab")) (lit "a")) "abc")
               (result "a" "bc"))
 
 ; emp tests
