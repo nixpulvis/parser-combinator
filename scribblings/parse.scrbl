@@ -62,7 +62,8 @@ A @Result is one of:
  @item{@racket['error], meaning the parser did not match}
  @item{@racket[(result _value _remaining)], meaning the parser matched a
  prefix of its input, producing @racket[_value], and left the string
- @racket[_remaining] unconsumed}
+ @racket[_remaining] unconsumed. @racket[_remaining] is the end of the
+ input, after the match, unchanged.}
 ]
 
 @deftech{Parser} : @racket[(-> string? (or/c 'error result?))]
@@ -70,6 +71,11 @@ A @Result is one of:
 A @Parser is a function that consumes a string and produces a @|Result|.
  A parser only ever matches a @emph{prefix} of its input. It is up to
  @racket[parse] to insist that a match covers the whole string.
+
+The @racket[_remaining] string of a parser's @Result must be the end of
+ its input, not other text. The combinators use only its length, to find
+ where the match ended, and go on from there in the input itself, so a
+ parser can't pass rewritten text on to the next one. See @racket[run].
 
 Parsers are functions. A parser can be applied directly to a
  string:
@@ -420,8 +426,13 @@ A @Run matches its string starting at the given position, and produces
  runs @racket[p] on @racket[str] from position @racket[i], producing a
  @|Match|. If @racket[p] is a @racket[parser], this calls its @|Run|.
  Otherwise @racket[p] is a plain function, and it is applied to a copy of
- @racket[str] from @racket[i] on. A @Run uses @racket[run] to run other
- parsers.
+ @racket[str] from @racket[i] on. The @racket[_end] of the @Match is the
+ length of @racket[str] less the length of the @racket[_remaining] string
+ that @racket[p] produces, so only that length is used, not the text.
+ @racket[run] raises @racket[exn:fail:contract] if @racket[_remaining] is
+ longer than the copy @racket[p] was given. A @racket[_remaining] of the
+ same length or shorter that isn't the end of the input is not detected.
+ A @Run uses @racket[run] to run other parsers.
 
 @examples[#:eval positions-eval
 (code:comment "Parser -> Parser")
@@ -446,4 +457,9 @@ A @Run matches its string starting at the given position, and produces
 (run (counted (lit "ab")) "x2ababab" 1)
 (parse (counted (lit "ab")) "3ababab")
 (eval:error (parse (counted (lit "ab")) "2ababab"))
+(code:comment "Parser")
+(code:comment "matches nothing, but gives back more text than it got")
+(define (GROW s)
+  (result 'g (string-append "zz" s)))
+(eval:error (run GROW "abc" 1))
 ]}

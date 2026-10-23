@@ -51,6 +51,8 @@
   (struct result (value remaining) #:transparent)
 
   ; A Parser is a [String -> Result]
+  ; that matches a prefix of the String. The Result's `remaining` is the
+  ; rest of the String, after the match.
 
   ; A Match is one of:
   ; - 'error
@@ -75,16 +77,26 @@
 
   ; Parser String Natural -> Match
   ; Runs any Parser from position `i` of `s`. A Parser that is a plain
-  ; function is applied to a copy of the rest of the input.
+  ; function is applied to a copy of the rest of the input. Only the
+  ; length of its `remaining` is used, to find where its match ended, so
+  ; it raises an error if `remaining` is longer than that copy.
   (define (run p s i)
     (if (parser? p)
         ((parser-run p) s i)
-        (let ([r (p (substring s i))])
-          (if (symbol? r)
-              'error
-              (matched (result-value r)
-                       (- (string-length s)
-                          (string-length (result-remaining r)))))))))
+        (let* ([in (substring s i)]
+               [r (p in)])
+          (cond [(symbol? r) 'error]
+                [(> (string-length (result-remaining r)) (string-length in))
+                 (raise-arguments-error
+                  'run
+                  "parser's remaining is longer than its input"
+                  "parser" p
+                  "input" in
+                  "remaining" (result-remaining r))]
+                [else
+                 (matched (result-value r)
+                          (- (string-length s)
+                             (string-length (result-remaining r))))])))))
 
 (require 'positions)
 
