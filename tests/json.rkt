@@ -72,6 +72,10 @@
               #e-1.23456)
 (check-equal? (parse NUMBER "1e5")
               100000)
+; A number longer than 64 digits, read without adding them up one at a
+; time, is still exact.
+(check-equal? (parse NUMBER (make-string 1000 #\9))
+              (sub1 (expt 10 1000)))
 (check-exn exn:fail? (λ () (parse NUMBER "1e")))
 (check-exn exn:fail? (λ () (parse NUMBER "1e+")))
 (check-exn exn:fail? (λ () (parse NUMBER "1.")))
