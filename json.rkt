@@ -8,8 +8,7 @@
          STRING
          ARRAY
          OBJECT
-         PAIR
-         SPACE)
+         PAIR)
 
 ; ----------------------
 ; ----- JSON Values -----
@@ -206,9 +205,15 @@
        (emp)))
 
 ; Parser
-; Matches one or more whitespace characters.
-(define-parser SPACE
-  (span json-space?))
+; Matches zero or more whitespace characters, producing '(). It moves
+; past the whitespace without copying it.
+(define SKIP-SPACE
+  (parser
+   (lambda (s i)
+     (let loop ([j i])
+       (if (and (< j (string-length s)) (json-space? (string-ref s j)))
+           (loop (add1 j))
+           (matched '() j))))))
 
 ; Char -> Boolean
 (define (json-space? c)
@@ -216,4 +221,4 @@
 
 ; Parser -> Parser
 (define (spacey l)
-  (unwrap (opt SPACE) l (opt SPACE)))
+  (unwrap SKIP-SPACE l SKIP-SPACE))
