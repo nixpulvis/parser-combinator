@@ -73,13 +73,11 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-grammar"]{Grammar}
 
-The grammar behind @racket[string->json] is made of the parsers below.
- @racket[SPACE] matches whitespace, and its @Value is the matched text.
- The rest produce the @JSON itself, using @racket[pmap]:
- @racket[NUMBER], @racket[STRING], @racket[ARRAY], and
- @racket[OBJECT] for those kinds of value, @racket[PAIR] for one name and
- value in an object, and @racket[VALUE] for any JSON value. These parsers
- are exported so that programs can use them directly.
+The grammar behind @racket[string->json] is made of the parsers below:
+ @racket[NUMBER], @racket[STRING], @racket[ARRAY], and @racket[OBJECT]
+ for those kinds of value, @racket[PAIR] for one name and value in an
+ object, and @racket[VALUE] for any JSON value. They're exported so that
+ programs can use them directly.
 
 @defthing[VALUE #,Parser]{
  matches any JSON value along with the whitespace around it. It
@@ -163,15 +161,6 @@ The grammar behind @racket[string->json] is made of the parsers below.
 ]}
 
 Wherever the grammar allows whitespace around a value or a punctuation
- mark, the parsers skip any whitespace there. Unlike @racket[SPACE], they
- don't copy the whitespace they skip.
-
-@defthing[SPACE #,Parser]{
- matches one or more whitespace characters: @racket[#\space],
- @racket[#\tab], @racket[#\newline], and @racket[#\return]. The @Value
- is the matched text.
-
-@examples[#:eval json-eval
-((opt SPACE) " \t\nx")
-((opt SPACE) "x")
-]}
+ mark, the parsers skip any whitespace there, without copying it.
+ Whitespace is any of @racket[#\space], @racket[#\tab],
+ @racket[#\newline], and @racket[#\return].

@@ -5,13 +5,6 @@
 (require "../parse.rkt")
 (require "../json.rkt")
 
-; SPACE tests
-(check-equal? (parse SPACE " \t\n\r ")
-              " \t\n\r ")
-(check-exn exn:fail? (λ () (parse SPACE "")))
-(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
-              (list 1 2))
-
 ; STRING tests
 (check-equal? (parse STRING "\"Hello World\"")
               "Hello World")
@@ -141,6 +134,8 @@
               'null)
 (check-equal? (parse VALUE " \n null\t")
               'null)
+(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
+              (list 1 2))
 
 ; string->json tests
 (define rjson-string1 "\"\"")
