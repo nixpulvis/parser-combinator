@@ -453,21 +453,19 @@
 
 ; Parser -> Parser
 ; Stops when `p` fails, or matches without consuming input, which would
-; otherwise repeat forever. The parser is built once, and refers to
-; itself for each further match.
+; otherwise repeat forever. The matches are collected in a loop, so a
+; long repetition doesn't nest a parser call per match.
 (define (star p)
-  (letrec ([step (parser
-                  (lambda (s i)
-                    (let ([m (run p s i)])
-                      (if (and (matched? m) (> (matched-end m) i)) m 'error)))
-                  (lambda ()
-                    (let ([st (start-of p)])
-                      (and st (start (start-chars st) #f)))))]
-           [self (alt (pmap cons
-                            step
-                            (parser (lambda (s i) (run self s i))))
-                      (emp))])
-    self))
+  (parser
+   (lambda (s i)
+     (let loop ([i i] [acc '()])
+       (let ([m (run p s i)])
+         (if (and (matched? m) (> (matched-end m) i))
+             (loop (matched-end m) (cons (matched-value m) acc))
+             (matched (reverse acc) i)))))
+   (lambda ()
+     (let ([st (start-of p)])
+       (and st (start (start-chars st) #t))))))
 
 ; [Value -> Any] Parser -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
