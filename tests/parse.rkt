@@ -56,8 +56,23 @@
               'error)
 (check-equal? ((span char-numeric?) "")
               'error)
+; Given a String, characters outside ASCII are matched too.
+(check-equal? ((span "aé") "aéab!")
+              (result "aéa" "b!"))
 (check-equal? ((seq (lit "x") (span char-numeric?)) "x42y")
               (result (list "x" "42") "y"))
+
+; skip tests
+(check-equal? ((skip " \t") " \t x")
+              (result '() "x"))
+(check-equal? ((skip " \t") "x")
+              (result '() "x"))
+(check-equal? ((skip " \t") "")
+              (result '() ""))
+(check-equal? ((skip char-numeric?) "42x")
+              (result '() "x"))
+(check-equal? ((seq (lit "[") (skip " ") (lit "]")) "[  ]")
+              (result (list "[" '() "]") ""))
 
 ; alt tests
 (check-equal? ((alt (lit "+") (lit "-")) "+123")
@@ -71,62 +86,84 @@
 (check-equal? ((alt (lit "+") (lit "-")) "007")
               'error)
 
-; alt* tests
-(check-equal? ((alt* (lit "+") (lit "-") (lit ".")) "-123")
+(check-equal? ((alt (lit "+") (lit "-") (lit ".")) "-123")
               (result "-" "123"))
-(check-equal? ((alt* (lit "+") (lit "-") (lit ".")) "-+.")
+(check-equal? ((alt (lit "+") (lit "-") (lit ".")) "-+.")
               (result "-" "+."))
-(check-equal? ((alt* (lit "1") (lit "12") (lit "123")) "123")
+(check-equal? ((alt (lit "1") (lit "12") (lit "123")) "123")
               (result "1" "23"))
-(check-equal? ((alt* (lit "+") (lit "-") (lit ".")) "123")
+(check-equal? ((alt (lit "+") (lit "-") (lit ".")) "123")
               'error)
-
-; switch tests
-(define PICK
-  (switch [(#\a #\b) (rx #rx"[ab]+")]
-          [(#\1) (lit "12")]
-          [else (opt (rx #rx".+"))]))
-(check-equal? (PICK "abba!")
-              (result "abba" "!"))
-(check-equal? (PICK "baa")
-              (result "baa" ""))
-(check-equal? (PICK "12x")
-              (result "12" "x"))
-; The chosen clause failing fails switch, even though `else` would match.
-(check-equal? (PICK "13")
+(check-equal? ((alt) "a")
               'error)
-(check-equal? (PICK "xyz")
-              (result "xyz" ""))
-(check-equal? (PICK "")
+; Alternatives that begin with the same character are tried in order.
+(check-equal? ((alt (lit "ab") (lit "ac")) "acd")
+              (result "ac" "d"))
+; One whose Start isn't known is tried for any character, in its place.
+(check-equal? ((alt (rx #rx"[0-9]+") (lit "a")) "a")
+              (result "a" ""))
+(check-equal? ((alt (lit "1") (rx #rx"[0-9]+")) "12")
+              (result "1" "2"))
+(check-equal? ((alt (rx #rx"[0-9]+") (lit "1")) "12")
+              (result "12" ""))
+; One that can match nothing is tried for any character, and at the end.
+(check-equal? ((alt (lit "a") (emp)) "b")
+              (result '() "b"))
+(check-equal? ((alt (lit "a") (opt (lit "b"))) "")
               (result '() ""))
-(check-equal? ((seq (lit "(") PICK) "(ab)")
-              (result (list "(" "ab") ")"))
-(check-equal? ((switch [(#\a) (lit "a")]) "b")
+(check-equal? ((alt (lit "a") (lit "b")) "")
               'error)
-(check-equal? ((switch [(#\a) (lit "a")]) "")
-              'error)
-; Clause parsers are built once, when switch is, not on every run.
-(define switch-builds 0)
-(define (counted-lit str)
-  (set! switch-builds (add1 switch-builds))
-  (lit str))
-(define COUNTED-SWITCH
-  (switch [(#\a) (counted-lit "a")]
-          [else (counted-lit "b")]))
-(check-equal? (list (COUNTED-SWITCH "a") (COUNTED-SWITCH "b") (COUNTED-SWITCH "")
-                    switch-builds)
-              (list (result "a" "") (result "b" "") 'error 2))
-; A malformed clause is a syntax error, rather than expanding forever.
-(define-namespace-anchor anchor)
-(define (expand-switch clauses)
-  (parameterize ([current-namespace (namespace-anchor->namespace anchor)])
-    (expand `(switch ,@clauses))))
-(check-exn (message-is "switch: bad syntax\n"
-                       "  in: (switch (#\\a (lit \"a\")))")
-           (λ () (expand-switch '([#\a (lit "a")]))))
-(check-exn (message-is "switch: bad syntax\n"
-                       "  in: (switch (else (lit \"b\")) ((#\\a) (lit \"a\")))")
-           (λ () (expand-switch '([else (lit "b")] [(#\a) (lit "a")]))))
+; Only the alternatives that could match the next character are run.
+(define tried '())
+(define (spy-for name c)
+  (parser (lambda (s i)
+            (set! tried (cons name tried))
+            (if (and (< i (string-length s)) (char=? (string-ref s i) c))
+                (matched name (add1 i))
+                'error))
+          (start (list c) #f)))
+(define SPIED (alt (spy-for 'a #\a) (spy-for 'b #\b) (spy-for 'c #\c)))
+(check-equal? (list (SPIED "c") (SPIED "b") (SPIED "x") tried)
+              (list (result 'c "") (result 'b "") 'error '(b c)))
+; A grammar that refers to itself.
+(define-parser PARENS
+  (alt (pmap (lambda (l inside r) (add1 inside))
+             (lit "(") PARENS (lit ")"))
+       (pmap (const 0) (emp))))
+(check-equal? (PARENS "((()))!")
+              (result 3 "!"))
+
+; start tests
+; Parser -> [Maybe (list [Listof Char] Boolean)]
+(define (chars-of p)
+  (let ([st (start-of p)])
+    (and st (list (sort (remove-duplicates (start-chars st)) char<?)
+                  (start-empty? st)))))
+(check-equal? (chars-of (lit "ab")) (list (list #\a) #f))
+(check-equal? (chars-of (lit "")) (list '() #t))
+(check-equal? (chars-of (span "01")) (list (list #\0 #\1) #f))
+(check-equal? (chars-of (span char-numeric?)) #f)
+(check-equal? (chars-of (skip " \t")) (list (list #\tab #\space) #t))
+(check-equal? (chars-of (skip char-numeric?)) #f)
+(check-equal? (chars-of (rx #rx"a")) #f)
+(check-equal? (chars-of (seq (opt (lit "-")) (lit "1") (lit "2")))
+              (list (list #\- #\1) #f))
+(check-equal? (chars-of (seq (opt (lit "-")) (star (lit "1"))))
+              (list (list #\- #\1) #t))
+; star and plus keep their parser's Start even when it can match empty.
+(check-equal? (chars-of (star (opt (lit "a")))) (list (list #\a) #t))
+(check-equal? (chars-of (plus (opt (lit "a")))) (list (list #\a) #t))
+(check-equal? (chars-of (alt (lit "a") (pmap string->symbol (lit "b"))))
+              (list (list #\a #\b) #f))
+(check-equal? (chars-of (alt (lit "a") (rx #rx"b"))) #f)
+(check-equal? (chars-of (where (pmap string->number (lit "2")) even?))
+              (list (list #\2) #f))
+(check-equal? (chars-of PARENS) (list (list #\() #t))
+; A Start that refers to itself, here through a grammar that can loop
+; back to itself without consuming anything, is #f rather than an error.
+(define-parser LOOPS
+  (alt (pmap list LOOPS (lit "x")) (lit "y")))
+(check-equal? (chars-of LOOPS) #f)
 
 ; seq tests
 (check-equal? ((seq (lit "-") (lit "+")) "-+...")

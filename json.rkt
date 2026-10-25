@@ -38,16 +38,22 @@
 ; -------------------------------------
 
 ; Parser
-; The first character of a value says what kind it is, so `switch`
-; runs only that kind's parser, rather than each being tried in turn.
+; Matches a value with any whitespace around it. As in JSON's grammar,
+; the whitespace between tokens belongs to the values, so it's looked
+; for once: a value skips the whitespace on both sides, and the
+; punctuation around it skips none. Each kind of value begins with its
+; own characters, so `alt` runs only the parser for the kind the first
+; character says, rather than trying each in turn.
 (define-parser VALUE
-  (spacey (switch [(#\n) (pmap (const 'null) (lit "null"))]
-                  [(#\t) (pmap (const true) (lit "true"))]
-                  [(#\f) (pmap (const false) (lit "false"))]
-                  [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
-                  [(#\") STRING]
-                  [(#\[) ARRAY]
-                  [(#\{) OBJECT])))
+  (unwrap SKIP-SPACE
+          (alt (pmap (const 'null) (lit "null"))
+               (pmap (const true) (lit "true"))
+               (pmap (const false) (lit "false"))
+               NUMBER
+               STRING
+               ARRAY
+               OBJECT)
+          SKIP-SPACE))
 
 ; Parser
 (define-parser NUMBER
@@ -60,12 +66,9 @@
                   (opt (alt (lit "+") (lit "-")))
                   DIGITS))))
 
-; Char -> Boolean
-(define (digit? c) (char<=? #\0 c #\9))
-
 ; Parser
 ; Matches a run of digits.
-(define DIGITS (span digit?))
+(define DIGITS (span "0123456789"))
 
 ; Parser
 ; Plain text is matched a run at a time with `span`, rather than a
@@ -74,29 +77,28 @@
 (define-parser STRING
   (pmap (lambda (open pieces close) (apply string-append pieces))
         (lit "\"")
-        (star (switch [(#\\) ESCAPE]
-                      [else (span string-char?)]))
+        (star (alt ESCAPE (span string-char?)))
         (lit "\"")))
 
 ; Parser
 ; Matches an escape sequence, producing the character it stands for as a
-; String. The backslash is matched once, and the letter after it chooses
-; the rest with `switch`, rather than each escape being tried in turn.
+; String. The backslash is matched once, and `alt` runs only the escape
+; that the letter after it begins, rather than trying each in turn.
 (define-parser ESCAPE
   ; String String -> Parser
   ; Matches the letter of an escape, producing the character it stands for.
   (let ([escaped (lambda (letter char) (pmap (const char) (lit letter)))])
     (pmap (lambda (backslash c) c)
           (lit "\\")
-          (switch [(#\") (escaped "\"" "\"")]
-                  [(#\\) (escaped "\\" "\\")]
-                  [(#\/) (escaped "/" "/")]
-                  [(#\b) (escaped "b" "\b")]
-                  [(#\f) (escaped "f" "\f")]
-                  [(#\n) (escaped "n" "\n")]
-                  [(#\r) (escaped "r" "\r")]
-                  [(#\t) (escaped "t" "\t")]
-                  [(#\u) UNICODE-ESCAPE]))))
+          (alt (escaped "\"" "\"")
+               (escaped "\\" "\\")
+               (escaped "/" "/")
+               (escaped "b" "\b")
+               (escaped "f" "\f")
+               (escaped "n" "\n")
+               (escaped "r" "\r")
+               (escaped "t" "\t")
+               UNICODE-ESCAPE))))
 
 ; Parser
 ; Matches the rest of a `\u` escape after its backslash, or of a UTF-16
@@ -134,7 +136,8 @@
                    [(hex-digit (string-ref s j))
                     => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
                    [else 'error]))
-           'error)))))
+           'error)))
+   (start (list #\u) #f)))
 
 ; Char -> [Maybe Natural]
 ; The value of `c` as a hexadecimal digit, or #f if it isn't one.
@@ -172,53 +175,50 @@
   (not (or (char=? c #\") (char=? c #\\) (char<? c #\space))))
 
 ; Parser
+; Matches an array with any whitespace around it. Inside a value, the
+; value has already skipped the whitespace before it, so that skip finds
+; none.
 (define-parser ARRAY
-  (unwrap (spacey (lit "["))
-          (comma-separated VALUE)
-          (spacey (lit "]"))))
+  (pmap (lambda (space open vs close space2) vs)
+        SKIP-SPACE
+        (lit "[")
+        (comma-separated VALUE)
+        (lit "]")
+        SKIP-SPACE))
 
 ; Parser
+; Matches an object with any whitespace around it, as for `ARRAY`.
 (define-parser OBJECT
-  (pmap (lambda (open pairs close)
+  (pmap (lambda (space open pairs close space2)
           (for/hasheq ([pair (in-list pairs)])
             (values (car pair) (cdr pair))))
-        (spacey (lit "{"))
+        SKIP-SPACE
+        (lit "{")
         (comma-separated PAIR)
-        (spacey (lit "}"))))
+        (lit "}")
+        SKIP-SPACE))
 
 ; Parser
+; Matches a pair with any whitespace around it.
 (define-parser PAIR
-  (pmap (lambda (name colon value) (cons (string->symbol name) value))
+  (pmap (lambda (space name space2 colon value)
+          (cons (string->symbol name) value))
+        SKIP-SPACE
         STRING
-        (spacey (lit ":"))
+        SKIP-SPACE
+        (lit ":")
         VALUE))
 
 ; Parser -> Parser
-; Matches zero or more `p`s separated by commas, producing the list of
-; their values.
+; Matches one or more `p`s separated by commas, producing the list of
+; their values, or only whitespace, producing '() as `SKIP-SPACE` does.
+; Each `p` skips the whitespace around itself, so the commas don't.
 (define (comma-separated p)
   (alt (pmap cons
              p
-             (star (pmap (lambda (comma x) x)
-                         (spacey (lit ","))
-                         p)))
-       (emp)))
+             (star (pmap (lambda (comma x) x) (lit ",") p)))
+       SKIP-SPACE))
 
 ; Parser
-; Matches zero or more whitespace characters, producing '(). It moves
-; past the whitespace without copying it.
-(define SKIP-SPACE
-  (parser
-   (lambda (s i)
-     (let loop ([j i])
-       (if (and (< j (string-length s)) (json-space? (string-ref s j)))
-           (loop (add1 j))
-           (matched '() j))))))
-
-; Char -> Boolean
-(define (json-space? c)
-  (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
-
-; Parser -> Parser
-(define (spacey l)
-  (unwrap SKIP-SPACE l SKIP-SPACE))
+; Matches zero or more whitespace characters, producing '().
+(define SKIP-SPACE (skip " \t\n\r"))
