@@ -156,7 +156,7 @@
 (check-equal? (chars-of (alt (lit "a") (pmap string->symbol (lit "b"))))
               (list (list #\a #\b) #f))
 (check-equal? (chars-of (alt (lit "a") (rx #rx"b"))) #f)
-(check-equal? (chars-of (where (pmap string->number (lit "2")) even?))
+(check-equal? (chars-of (where even? (pmap string->number (lit "2"))))
               (list (list #\2) #f))
 (check-equal? (chars-of PARENS) (list (list #\() #t))
 ; A Start that refers to itself, here through a grammar that can loop
@@ -244,17 +244,17 @@
 
 ; where tests
 (define NUMBER (pmap string->number (rx #px"\\d+")))
-(check-equal? ((where NUMBER even?) "42!")
+(check-equal? ((where even? NUMBER) "42!")
               (result 42 "!"))
-(check-equal? ((where NUMBER even?) "41!")
+(check-equal? ((where even? NUMBER) "41!")
               'error)
-(check-equal? ((where NUMBER even?) "x")
+(check-equal? ((where even? NUMBER) "x")
               'error)
-(check-equal? ((seq (lit "#") (where NUMBER even?)) "#42!")
+(check-equal? ((seq (lit "#") (where even? NUMBER)) "#42!")
               (result (list "#" 42) "!"))
-(check-equal? ((seq (lit "#") (where NUMBER even?)) "#41!")
+(check-equal? ((seq (lit "#") (where even? NUMBER)) "#41!")
               'error)
-(check-equal? ((alt (where (lit "ab") (const #f)) (lit "a")) "abc")
+(check-equal? ((alt (where (const #f) (lit "ab")) (lit "a")) "abc")
               (result "a" "bc"))
 
 ; emp tests
