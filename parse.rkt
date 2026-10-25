@@ -8,7 +8,7 @@
          rx
          span
          seq
-         seq*
+         pmap
          alt
          alt*
          switch
@@ -25,8 +25,9 @@
 ; A Value is whatever a parser produces:
 ; - `emp` produces '()
 ; - `lit`, `rx` and `span` produce the matched String
-; - `seq` and `seq*` produce whatever their constructor returns,
-;   given their parsers' Values
+; - `pmap` produces whatever its function returns, given its parsers'
+;   Values
+; - `seq` produces the list of its parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
 ; - `switch` produces the Value of the parser it chose
 ; - `opt` produces its parser's Value, or '() if its parser fails
@@ -155,39 +156,111 @@
                'error
                (matched (substring s i j) j)))))))
 
-; Symbol Any Natural -> Void
-; Raises an error for `who` unless `build` is a constructor that accepts
-; `n` Values.
-(define (check-constructor who build n)
-  (unless (and (procedure? build) (procedure-arity-includes? build n))
-    (raise-argument-error who
-                          (format "(procedure-arity-includes/c ~a)" n)
-                          build)))
-
-; (Value Value -> Value) Parser Parser -> Parser
-(define (seq build p1 p2)
-  (check-constructor 'seq build 2)
-  (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1)
-           'error
-           (let ([m2 (run p2 s (matched-end m1))])
-             (if (symbol? m2)
-                 'error
-                 (matched (build (matched-value m1) (matched-value m2))
-                          (matched-end m2)))))))))
-
 ; (Value ... -> Value) Parser Parser ... -> Parser
-; The constructor gets one Value per parser, collected into a list by
-; nesting `seq` with `cons`.
-(define (seq* build p . ps)
-  (check-constructor 'seq* build (add1 (length ps)))
-  (seq (lambda (v vs) (apply build v vs))
-       p
-       (foldr (lambda (p rest) (seq cons p rest))
-              (emp)
-              ps)))
+; Runs the parsers in order, each from where the last one's match ended,
+; and produces `f` of their Values, one argument per parser, as `map`
+; calls its function with one element per list. With one parser, it
+; converts that parser's Value. Unless `f` accepts that many arguments,
+; it raises an error when the parser is made, before any input is parsed.
+(define (pmap f p . ps)
+  (let* ([ps (cons p ps)] [n (length ps)])
+    (unless (and (procedure? f) (procedure-arity-includes? f n))
+      (raise-argument-error 'pmap (format "(procedure-arity-includes/c ~a)" n) f))
+    (parser (all-of f ps))))
+
+; Parser Parser ... -> Parser
+; Runs the parsers in order, as `pmap` does, and produces the list of
+; their Values.
+(define (seq p . ps)
+  (apply pmap list p ps))
+
+; Natural
+; The most parsers `all-of` writes a Run out for, with `steps`. Longer
+; sequences use its loop. A written-out Run costs nothing to pick, since
+; `all-of` picks it once, when the parser is made, but each one adds to
+; the compiled code. Every sequence in the JSON grammar is shorter than
+; that. The tests run every length up to 20, so they cover the loop as
+; long as this stays below that.
+(define-for-syntax written-out 6)
+
+; (Value ... -> Value) [Listof Parser] -> Run
+; Matches all of `ps`, in order, each from where the last one's match
+; ended, and calls `build` with their Values. It fails if any of them
+; does.
+;
+; The loop at the end does this for any number of parsers, but it
+; collects the Values in a list, then reverses it and applies `build` to
+; it, which allocates a list for every match. Most sequences are short,
+; so for up to `written-out` parsers `all-of` instead uses a Run written
+; for that number. That Run keeps each Value in a variable of its own and
+; calls `build` with them as plain arguments, so a match allocates no
+; list.
+(define (all-of build ps)
+  (or (written-out-run build ps)
+      (lambda (s i)
+        (let loop ([ps ps] [i i] [vs '()])
+          (if (null? ps)
+              (matched (apply build (reverse vs)) i)
+              (let ([m (run (car ps) s i)])
+                (if (symbol? m)
+                    'error
+                    (loop (cdr ps)
+                          (matched-end m)
+                          (cons (matched-value m) vs)))))))))
+
+; (written-out-run build ps) : (or/c Run #f)
+; The Run that `steps` writes out for as many parsers as `ps` has, or #f
+; when it has more than `written-out`. It expands to a `match` with a
+; case for each number of parsers from 1 to `written-out`, so for
+; `written-out` 2 it's
+;
+;   (match ps
+;     [(list p1) (lambda (s i) (steps s i build () (p1)))]
+;     [(list p1 p2) (lambda (s i) (steps s i build () (p1 p2)))]
+;     [_ #f])
+(define-syntax (written-out-run stx)
+  (syntax-case stx ()
+    [(_ build ps)
+     (with-syntax ([((p ...) ...)
+                    (for/list ([n (in-range 1 (add1 written-out))])
+                      (generate-temporaries (build-list n (lambda (k) 'p))))])
+       #'(match ps
+           [(list p ...) (lambda (s i) (steps s i build () (p ...)))]
+           ...
+           [_ #f]))]))
+
+; (steps s i build (v ...) (p ...)) : Match
+; Writes out the body of one of `all-of`'s Runs. It runs each `p` in
+; order, the first from position `i` of `s`, and fails as soon as one
+; does. Otherwise it calls `build` with the Values `v ...` followed by
+; the Values of the `p`s, and ends where the last `p` ended. `all-of`
+; starts it with no `v`s, and each step adds one. For example,
+; (steps s i build () (a b)) expands to
+;
+;   (let ([m (run a s i)])
+;     (if (symbol? m)
+;         'error
+;         (let ([x (matched-value m)] [j (matched-end m)])
+;           (let ([m (run b s j)])
+;             (if (symbol? m)
+;                 'error
+;                 (let ([x2 (matched-value m)] [j2 (matched-end m)])
+;                   (matched (build x x2) j2)))))))
+;
+; Each step's `x`, `j` and `m` are new variables, which `syntax-rules`
+; keeps apart, so no step's Value hides an earlier one's. They're
+; written `x2` and `j2` above to show that. It's a macro only so the
+; written-out Runs don't have to be written by hand.
+(define-syntax steps
+  (syntax-rules ()
+    [(_ s i build (v ...) ())
+     (matched (build v ...) i)]
+    [(_ s i build (v ...) (p rest ...))
+     (let ([m (run p s i)])
+       (if (symbol? m)
+           'error
+           (let ([x (matched-value m)] [j (matched-end m)])
+             (steps s j build (v ... x) (rest ...)))))]))
 
 ; Parser Parser -> Parser
 (define (alt p1 p2)
@@ -243,13 +316,15 @@
                   (lambda (s i)
                     (let ([m (run p s i)])
                       (if (and (matched? m) (> (matched-end m) i)) m 'error))))]
-           [self (alt (seq cons step (parser (lambda (s i) (run self s i))))
+           [self (alt (pmap cons
+                            step
+                            (parser (lambda (s i) (run self s i))))
                       (emp))])
     self))
 
 ; Parser -> Parser
 (define (plus p)
-  (seq cons p (star p)))
+  (pmap cons p (star p)))
 
 ; Parser [Value -> Any] -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
@@ -261,4 +336,4 @@
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
-  (seq* (lambda (l b r) b) left body right))
+  (pmap (lambda (l b r) b) left body right))

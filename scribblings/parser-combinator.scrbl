@@ -25,16 +25,16 @@ The package comes with two libraries:
 @; -----------------------------------------------------------------------------
 @section[#:tag "quick"]{Quick Start}
 
-A @tech{Parser} turns a string into a @tech{Value}. The constructors given
- to @racket[seq] and @racket[seq*] decide what that @tech{Value} is, so a
- grammar can compute the data the program needs while it parses.
+A @tech{Parser} turns a string into a @tech{Value}. The functions given
+ to @racket[pmap] decide what that @tech{Value} is, so a grammar can
+ compute the data the program needs while it parses.
 
 Take numbers such as @racket["0"], @racket["-7"], and @racket["140"]. A
  number is an optional minus sign followed by either a lone zero or a
  non-zero digit and any number of further digits. @racket[ZERO] and
- @racket[NONZERO-DIGIT] use @racket[string->number] as their
- constructor, so the digit parsers produce each digit's value instead of
- its text:
+ @racket[NONZERO-DIGIT] use @racket[pmap] to apply
+ @racket[string->number] to the text they match, so the digit parsers
+ produce each digit's value instead of its text:
 
 @examples[#:eval quick-eval #:label #f #:no-result
 (require parser-combinator/parse)
@@ -42,12 +42,12 @@ Take numbers such as @racket["0"], @racket["-7"], and @racket["140"]. A
 (code:comment "Parser")
 (code:comment "matches the digit 0, producing its value")
 (define-parser ZERO
-  (seq* string->number (lit "0")))
+  (pmap string->number (lit "0")))
 
 (code:comment "Parser")
 (code:comment "matches a digit 1 through 9, producing its value")
 (define-parser NONZERO-DIGIT
-  (seq* string->number (rx #rx"[1-9]")))
+  (pmap string->number (rx #rx"[1-9]")))
 
 (code:comment "Parser")
 (code:comment "matches any digit, producing its value")
@@ -69,16 +69,16 @@ A natural number other than zero starts with a non-zero digit, and
 (code:comment "matches a natural number, producing its value")
 (define-parser NATURAL
   (alt ZERO
-       (seq (lambda (d ds) (foldl add-digit d ds))
-            NONZERO-DIGIT
-            (star DIGIT))))
+       (pmap (lambda (d ds) (foldl add-digit d ds))
+             NONZERO-DIGIT
+             (star DIGIT))))
 
 (code:comment "Parser")
 (code:comment "matches an integer, producing its value")
 (define-parser NUMBER
-  (seq (lambda (sign n) (if (null? sign) n (- n)))
-       (opt (lit "-"))
-       NATURAL))
+  (pmap (lambda (sign n) (if (null? sign) n (- n)))
+        (opt (lit "-"))
+        NATURAL))
 ]
 
 Running a parser with @racket[parse] produces the number:
