@@ -42,9 +42,9 @@
 ; The first character of a value says what kind it is, so `switch`
 ; runs only that kind's parser, rather than each being tried in turn.
 (define-parser VALUE
-  (spacey (switch [(#\n) (seq* (const 'null) (lit "null"))]
-                  [(#\t) (seq* (const true) (lit "true"))]
-                  [(#\f) (seq* (const false) (lit "false"))]
+  (spacey (switch [(#\n) (pmap (const 'null) (lit "null"))]
+                  [(#\t) (pmap (const true) (lit "true"))]
+                  [(#\f) (pmap (const false) (lit "false"))]
                   [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
                   [(#\") STRING]
                   [(#\[) ARRAY]
@@ -52,15 +52,14 @@
 
 ; Parser
 (define-parser NUMBER
-  (seq* (lambda parts
+  (pmap (lambda parts
           (string->number (apply string-append "#e" (flatten parts))))
         (opt (lit "-"))
         (alt (lit "0") DIGITS)
-        (opt (seq list (lit ".") DIGITS))
-        (opt (seq* list
-                   (alt (lit "e") (lit "E"))
-                   (opt (alt (lit "+") (lit "-")))
-                   DIGITS))))
+        (opt (seq (lit ".") DIGITS))
+        (opt (seq (alt (lit "e") (lit "E"))
+                  (opt (alt (lit "+") (lit "-")))
+                  DIGITS))))
 
 ; Char -> Boolean
 (define (digit? c) (char<=? #\0 c #\9))
@@ -74,7 +73,7 @@
 ; character at a time, so a long string doesn't cost a parser step per
 ; character.
 (define-parser STRING
-  (seq* (lambda (open pieces close) (apply string-append pieces))
+  (pmap (lambda (open pieces close) (apply string-append pieces))
         (lit "\"")
         (star (switch [(#\\) ESCAPE]
                       [else (span string-char?)]))
@@ -87,18 +86,18 @@
 (define-parser ESCAPE
   ; String String -> Parser
   ; Matches the letter of an escape, producing the character it stands for.
-  (let ([escaped (lambda (letter char) (seq* (const char) (lit letter)))])
-    (seq (lambda (backslash c) c)
-         (lit "\\")
-         (switch [(#\") (escaped "\"" "\"")]
-                 [(#\\) (escaped "\\" "\\")]
-                 [(#\/) (escaped "/" "/")]
-                 [(#\b) (escaped "b" "\b")]
-                 [(#\f) (escaped "f" "\f")]
-                 [(#\n) (escaped "n" "\n")]
-                 [(#\r) (escaped "r" "\r")]
-                 [(#\t) (escaped "t" "\t")]
-                 [(#\u) UNICODE-ESCAPE]))))
+  (let ([escaped (lambda (letter char) (pmap (const char) (lit letter)))])
+    (pmap (lambda (backslash c) c)
+          (lit "\\")
+          (switch [(#\") (escaped "\"" "\"")]
+                  [(#\\) (escaped "\\" "\\")]
+                  [(#\/) (escaped "/" "/")]
+                  [(#\b) (escaped "b" "\b")]
+                  [(#\f) (escaped "f" "\f")]
+                  [(#\n) (escaped "n" "\n")]
+                  [(#\r) (escaped "r" "\r")]
+                  [(#\t) (escaped "t" "\t")]
+                  [(#\u) UNICODE-ESCAPE]))))
 
 ; Parser
 ; Matches the rest of a `\u` escape after its backslash, or of a UTF-16
@@ -106,17 +105,17 @@
 ; A surrogate without its other half produces the replacement character
 ; U+FFFD.
 (define-parser UNICODE-ESCAPE
-  (alt (seq (lambda (high low)
-              (string (integer->char
-                       (+ first-supplementary
-                          (arithmetic-shift (- high first-high-surrogate)
-                                            surrogate-bits)
-                          (- low first-low-surrogate)))))
-            (where CODE-UNIT high-surrogate?)
-            (seq (lambda (backslash low) low)
-                 (lit "\\")
-                 (where CODE-UNIT low-surrogate?)))
-       (seq* (lambda (n)
+  (alt (pmap (lambda (high low)
+               (string (integer->char
+                        (+ first-supplementary
+                           (arithmetic-shift (- high first-high-surrogate)
+                                             surrogate-bits)
+                           (- low first-low-surrogate)))))
+             (where CODE-UNIT high-surrogate?)
+             (pmap (lambda (backslash low) low)
+                   (lit "\\")
+                   (where CODE-UNIT low-surrogate?)))
+       (pmap (lambda (n)
                (string (if (surrogate? n)
                            replacement-character
                            (integer->char n))))
@@ -181,7 +180,7 @@
 
 ; Parser
 (define-parser OBJECT
-  (seq* (lambda (open pairs close)
+  (pmap (lambda (open pairs close)
           (for/hasheq ([pair (in-list pairs)])
             (values (car pair) (cdr pair))))
         (spacey (lit "{"))
@@ -190,7 +189,7 @@
 
 ; Parser
 (define-parser PAIR
-  (seq* (lambda (name colon value) (cons (string->symbol name) value))
+  (pmap (lambda (name colon value) (cons (string->symbol name) value))
         STRING
         (spacey (lit ":"))
         VALUE))
@@ -199,9 +198,11 @@
 ; Matches zero or more `p`s separated by commas, producing the list of
 ; their values.
 (define (comma-separated p)
-  (alt (seq cons
-            p
-            (star (seq (lambda (comma x) x) (spacey (lit ",")) p)))
+  (alt (pmap cons
+             p
+             (star (pmap (lambda (comma x) x)
+                         (spacey (lit ","))
+                         p)))
        (emp)))
 
 ; Parser
