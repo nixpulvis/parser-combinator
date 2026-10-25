@@ -16,24 +16,29 @@
          star
          plus
          where
-         unwrap)
+         unwrap
+         preceded
+         terminated)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
 ; ----------------------------------------
 
 ; A Value is whatever a parser produces:
-; - `emp` produces '()
+; - `emp` produces its Value, '() unless it's given one
 ; - `lit`, `rx` and `span` produce the matched String
 ; - `pmap` produces whatever its function returns, given its parsers'
 ;   Values
 ; - `seq` produces the list of its parsers' Values
 ; - `alt` and `alt*` produce the Value of the parser that matched
 ; - `switch` produces the Value of the parser it chose
-; - `opt` produces its parser's Value, or '() if its parser fails
+; - `opt` produces its parser's Value, or its default if its parser
+;   fails, '() unless it's given one
 ; - `star` and `plus` produce the list of their parser's Values
 ; - `where` produces its parser's Value, when its condition is met
 ; - `unwrap` produces the Value of its middle parser
+; - `preceded` and `terminated` produce the Value of the parser they
+;   don't skip
 
 ; Parsers that match from a position in their input, rather than from
 ; the start of a copy of what's left of it. The combinators below are
@@ -115,10 +120,12 @@
 ; from the kernel's.
 
 ; -> Parser
-(define (emp)
+; Value -> Parser
+; Matches without consuming anything, producing `v`.
+(define (emp [v '()])
   (parser
    (lambda (s i)
-     (matched '() i))))
+     (matched v i))))
 
 ; String -> Parser
 (define (lit str)
@@ -333,8 +340,10 @@
       (alt p (apply alt* ps))))
 
 ; Parser -> Parser
-(define (opt p)
-  (alt p (emp)))
+; Parser Value -> Parser
+; Matches what `p` matches, or else nothing, producing `default`.
+(define (opt p [default '()])
+  (alt p (emp default)))
 
 ; Parser -> Parser
 (define (plus p)
@@ -343,3 +352,13 @@
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
   (pmap (lambda (l b r) b) left body right))
+
+; Parser Parser -> Parser
+; Matches `skipped` and then `p`, producing `p`'s Value.
+(define (preceded skipped p)
+  (pmap (lambda (_ v) v) skipped p))
+
+; Parser Parser -> Parser
+; Matches `p` and then `skipped`, producing `p`'s Value.
+(define (terminated p skipped)
+  (pmap (lambda (v _) v) p skipped))

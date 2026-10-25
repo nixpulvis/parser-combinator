@@ -199,6 +199,11 @@
               (result '() "123"))
 (check-equal? ((opt (lit "-")) "")
               (result '() ""))
+; With a default, a failed match produces it, and a match ignores it.
+(check-equal? ((opt (lit "-") #f) "123")
+              (result #f "123"))
+(check-equal? ((opt (lit "-") #f) "-123")
+              (result "-" "123"))
 
 ; where tests
 (define NUMBER (pmap string->number (rx #px"\\d+")))
@@ -220,6 +225,8 @@
               (result '() "123"))
 (check-equal? ((emp) "")
               (result '() ""))
+(check-equal? ((emp 0) "123")
+              (result 0 "123"))
 
 ; plus tests
 (check-equal? ((plus (lit "+")) "123")
@@ -260,6 +267,20 @@
 (check-equal? ((unwrap (lit "+") (star (lit "!")) (lit "+")) "+!!+++")
               (result (list "!" "!") "++"))
 (check-equal? ((unwrap (lit "+") (lit "!") (lit "+")) "+!-")
+              'error)
+
+; preceded and terminated tests
+(check-equal? ((preceded (lit "$") (lit "4")) "$42")
+              (result "4" "2"))
+(check-equal? ((preceded (lit "$") (lit "4")) "4")
+              'error)
+(check-equal? ((preceded (lit "$") (lit "4")) "$5")
+              'error)
+(check-equal? ((terminated (lit "4") (lit "%")) "4%2")
+              (result "4" "2"))
+(check-equal? ((terminated (lit "4") (lit "%")) "4")
+              'error)
+(check-equal? ((terminated (lit "4") (lit "%")) "%")
               'error)
 
 ; plain function parsers

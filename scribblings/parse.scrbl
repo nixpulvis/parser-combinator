@@ -36,7 +36,7 @@
 A @Value is whatever a @Parser produces when it matches. The parsers in
  this library produce plain Racket values:
 @itemlist[
- @item{@racket[emp] produces @racket['()]}
+ @item{@racket[emp] produces the @Value it's given, or @racket['()]}
  @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
  text, a string}
  @item{@racket[pmap] produces whatever its function returns, given its
@@ -45,13 +45,15 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
  that matched}
  @item{@racket[switch] produces the @Value of the parser it chose}
- @item{@racket[opt] produces its parser's @Value, or @racket['()] if its
+ @item{@racket[opt] produces its parser's @Value, or its default if its
  parser fails}
  @item{@racket[star] and @racket[plus] produce the list of their
  parser's @|Value|s}
  @item{@racket[where] produces its parser's @|Value|, when its
  condition is met}
  @item{@racket[unwrap] produces the @Value of its middle parser}
+ @item{@racket[preceded] and @racket[terminated] produce the @Value of
+ the parser they don't skip}
 ]
 The functions given to @racket[pmap] are where a grammar builds the data
  the program needs, such as a number, or a structure of its own.
@@ -117,15 +119,16 @@ The parsers made by this library pass positions in the input to one
 @; -----------------------------------------------------------------------------
 @section[#:tag "primitive"]{Primitive Parsers}
 
-@defproc[(emp) #,Parser]{
+@defproc[(emp [v any/c '()]) #,Parser]{
  produces a @Parser that always succeeds without consuming any input.
- The @Value is @racket['()].
+ The @Value is @racket[v].
 
  Note that @racket[emp] is a function that produces a parser, not a
  parser itself, so it is used as @racket[(emp)].
 
 @examples[#:eval parse-eval
 ((emp) "abc")
+((emp 0) "abc")
 ]}
 
 @defproc[(lit [str string?]) #,Parser]{
@@ -291,14 +294,15 @@ The parsers made by this library pass positions in the input to one
 ((switch [(#\a) (lit "ab")] [else (lit "ac")]) "ac")
 ]}
 
-@defproc[(opt [p #,Parser]) #,Parser]{
+@defproc[(opt [p #,Parser] [default any/c '()]) #,Parser]{
  produces a @Parser that behaves like @racket[p] if @racket[p] matches,
  and otherwise succeeds without consuming input, producing
- @racket['()].
+ @racket[default]. It is the same as @racket[(alt p (emp default))].
 
 @examples[#:eval parse-eval
 ((opt (lit "-")) "-5")
 ((opt (lit "-")) "5")
+((opt (lit "-") "+") "5")
 ]}
 
 @defproc[(star [p #,Parser]) #,Parser]{
@@ -367,6 +371,29 @@ The parsers made by this library pass positions in the input to one
 (define SPACES (star (lit " ")))
 (parse (unwrap SPACES (lit "x") SPACES) "  x ")
 ]}
+
+@defproc[(preceded [skipped #,Parser] [p #,Parser]) #,Parser]{
+ produces a @Parser that runs @racket[skipped] and then @racket[p], and
+ produces the @Value of @racket[p]. It is the same as
+ @racket[(pmap (lambda (_ v) v) skipped p)], and is useful for dropping
+ punctuation in front of a value.
+
+@examples[#:eval parse-eval
+(parse (preceded (lit "$") (rx #px"\\d+")) "$42")
+]}
+
+@defproc[(terminated [p #,Parser] [skipped #,Parser]) #,Parser]{
+ produces a @Parser that runs @racket[p] and then @racket[skipped], and
+ produces the @Value of @racket[p]. It is the same as
+ @racket[(pmap (lambda (v _) v) p skipped)].
+
+@examples[#:eval parse-eval
+(parse (terminated (rx #px"\\d+") (lit "%")) "42%")
+]
+
+ The names and argument orders are those of @tt{preceded} and
+ @tt{terminated} in Rust's nom library, which calls @racket[unwrap]
+ @tt{delimited}.}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "run-parsers"]{Run Parsers}
