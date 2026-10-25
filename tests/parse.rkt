@@ -56,8 +56,23 @@
               'error)
 (check-equal? ((span char-numeric?) "")
               'error)
+; Given a String, characters outside ASCII are matched too.
+(check-equal? ((span "aé") "aéab!")
+              (result "aéa" "b!"))
 (check-equal? ((seq (lit "x") (span char-numeric?)) "x42y")
               (result (list "x" "42") "y"))
+
+; skip tests
+(check-equal? ((skip " \t") " \t x")
+              (result '() "x"))
+(check-equal? ((skip " \t") "x")
+              (result '() "x"))
+(check-equal? ((skip " \t") "")
+              (result '() ""))
+(check-equal? ((skip char-numeric?) "42x")
+              (result '() "x"))
+(check-equal? ((seq (lit "[") (skip " ") (lit "]")) "[  ]")
+              (result (list "[" '() "]") ""))
 
 ; alt tests
 (check-equal? ((alt (lit "+") (lit "-")) "+123")
@@ -128,6 +143,8 @@
 (check-equal? (chars-of (lit "")) (list '() #t))
 (check-equal? (chars-of (span "01")) (list (list #\0 #\1) #f))
 (check-equal? (chars-of (span char-numeric?)) #f)
+(check-equal? (chars-of (skip " \t")) (list (list #\tab #\space) #t))
+(check-equal? (chars-of (skip char-numeric?)) #f)
 (check-equal? (chars-of (rx #rx"a")) #f)
 (check-equal? (chars-of (seq (opt (lit "-")) (lit "1") (lit "2")))
               (list (list #\- #\1) #f))

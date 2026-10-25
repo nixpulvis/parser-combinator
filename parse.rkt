@@ -7,6 +7,7 @@
          lit
          rx
          span
+         skip
          seq
          pmap
          alt
@@ -25,6 +26,7 @@
 ; A Value is whatever a parser produces:
 ; - `emp` produces its Value, '() unless it's given one
 ; - `lit`, `rx` and `span` produce the matched String
+; - `skip` produces '()
 ; - `pmap` produces whatever its function returns, given its parsers'
 ;   Values
 ; - `seq` produces the list of its parsers' Values
@@ -220,29 +222,54 @@
 ; or, given a String, that are in it. Unlike `rx`, it has no fixed cost
 ; per match, so it suits runs that are often short, like whitespace.
 (define (span ok?)
-  (let ([accepts? (if (string? ok?) (char-in ok?) ok?)])
-    (parser
-     (lambda (s i)
-       (let loop ([j i])
-         (if (and (< j (string-length s)) (accepts? (string-ref s j)))
-             (loop (add1 j))
-             (if (= j i)
-                 'error
-                 (matched (substring s i j) j)))))
-     (and (string? ok?) (start (string->list ok?) #f)))))
+  (parser
+   (scan ok? (s i j)
+     (if (= j i)
+         'error
+         (matched (substring s i j) j)))
+   (and (string? ok?) (start (string->list ok?) #f))))
 
-; String -> [Char -> Boolean]
-; Whether a character is in `str`. ASCII characters are looked up in a
-; table, so a long `str` costs no more than a short one.
-(define (char-in str)
-  (let* ([cs (string->list str)]
-         [ascii (build-vector 128 (lambda (n) (and (memv (integer->char n) cs) #t)))]
-         [others (filter (lambda (c) (>= (char->integer c) 128)) cs)])
-    (lambda (c)
-      (let ([n (char->integer c)])
-        (if (< n 128)
-            (vector-ref ascii n)
-            (and (memv c others) #t))))))
+; (or/c [Char -> Any] String) -> Parser
+; Like `span`, but matches zero or more characters, and produces '()
+; rather than copying them, for text a grammar only skips over.
+(define (skip ok?)
+  (parser
+   (scan ok? (s i j)
+     (matched '() j))
+   (and (string? ok?) (start (string->list ok?) #t))))
+
+; (scan ok? (s i j) body) : Run
+; Makes a Run that finds where the run of characters that `ok?` accepts,
+; or that are in it, ends, from position `i` of `s`, and then evaluates
+; `body` with that position as `j`. Given a String, its ASCII characters
+; are looked up in a table. The loop is written out in each Run, not
+; called, so a Run that skips nothing costs no more than a check.
+(define-syntax-rule (scan ok? (s i j) body)
+  (if (string? ok?)
+      (let-values ([(ascii others) (char-table ok?)])
+        (lambda (s i)
+          (let ([j (let loop ([j i])
+                     (if (< j (string-length s))
+                         (let* ([c (string-ref s j)] [n (char->integer c)])
+                           (if (if (< n 128) (vector-ref ascii n) (memv c others))
+                               (loop (add1 j))
+                               j))
+                         j))])
+            body)))
+      (lambda (s i)
+        (let ([j (let loop ([j i])
+                   (if (and (< j (string-length s)) (ok? (string-ref s j)))
+                       (loop (add1 j))
+                       j))])
+          body))))
+
+; String -> (values [Vectorof Boolean] [Listof Char])
+; A table of which ASCII characters are in `str`, and its other
+; characters.
+(define (char-table str)
+  (let ([cs (string->list str)])
+    (values (build-vector 128 (lambda (n) (and (memv (integer->char n) cs) #t)))
+            (filter (lambda (c) (>= (char->integer c) 128)) cs))))
 
 ; (Value ... -> Value) Parser Parser ... -> Parser
 ; Runs the parsers in order, each from where the last one's match ended,

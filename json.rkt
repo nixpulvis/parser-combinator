@@ -220,17 +220,5 @@
        SKIP-SPACE))
 
 ; Parser
-; Matches zero or more whitespace characters, producing '(). It moves
-; past the whitespace without copying it.
-(define SKIP-SPACE
-  (parser
-   (lambda (s i)
-     (let loop ([j i])
-       (if (and (< j (string-length s)) (json-space? (string-ref s j)))
-           (loop (add1 j))
-           (matched '() j))))
-   (start (list #\space #\tab #\newline #\return) #t)))
-
-; Char -> Boolean
-(define (json-space? c)
-  (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
+; Matches zero or more whitespace characters, producing '().
+(define SKIP-SPACE (skip " \t\n\r"))

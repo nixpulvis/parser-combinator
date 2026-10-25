@@ -39,6 +39,7 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  @item{@racket[emp] produces the @Value it's given, or @racket['()]}
  @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
  text, a string}
+ @item{@racket[skip] produces @racket['()]}
  @item{@racket[pmap] produces whatever its function returns, given its
  parsers' @|Value|s}
  @item{@racket[seq] produces the list of its parsers' @|Value|s}
@@ -178,6 +179,22 @@ The parsers made by this library pass positions in the input to one
  match a fixed number of characters, which takes an @racket[rx] such as
  @racket[(rx #px"[0-9]{4}")].}
 
+@defproc[(skip [ok? (or/c (-> char? any/c) string?)]) #,Parser]{
+ produces a @Parser that matches the longest run of zero or more
+ characters that @racket[ok?] accepts, or, when @racket[ok?] is a
+ string, that are in it. It always succeeds, and its @Value is
+ @racket['()], so it doesn't copy the text it skips. It is for text a
+ grammar passes over, such as whitespace.
+
+@examples[#:eval parse-eval
+((skip " \t") "  \tx")
+((skip " \t") "x")
+]
+
+ Given a string, @racket[skip] knows which characters it can start
+ with, as @racket[span] does, and that it can match without consuming
+ anything.}
+
 @; -----------------------------------------------------------------------------
 @section[#:tag "combinator"]{Combinators}
 
@@ -270,7 +287,8 @@ The parsers made by this library pass positions in the input to one
  @racket[(lit "")], like @racket[emp], matches without consuming
  anything}
  @item{@racket[span] given a string starts with one of its
- characters}
+ characters, and @racket[skip] given a string does too, or matches
+ without consuming anything}
  @item{@racket[pmap] and @racket[seq] start with what their first
  parser can, and if that can match without consuming anything, also
  with what the next can, and so on}
@@ -281,10 +299,10 @@ The parsers made by this library pass positions in the input to one
  can, @racket[unwrap], @racket[preceded] and @racket[terminated] like
  the @racket[pmap] they're made of, and a parser made by
  @racket[define-parser] with what its body can}
- @item{any other parser, such as an @racket[rx], a @racket[span] given a
- function, a plain function, or a @racket[parser] made without a
- @racket[start], could start with anything, so @racket[alt] always
- tries it}
+ @item{any other parser, such as an @racket[rx], a @racket[span] or
+ @racket[skip] given a function, a plain function, or a @racket[parser]
+ made without a @racket[start], could start with anything, so
+ @racket[alt] always tries it}
 ]
  @racket[alt] works out which alternatives to try for each character
  the first time it runs, by when the whole grammar has been defined, so
