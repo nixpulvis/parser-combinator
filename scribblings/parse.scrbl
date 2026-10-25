@@ -42,9 +42,7 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  @item{@racket[pmap] produces whatever its function returns, given its
  parsers' @|Value|s}
  @item{@racket[seq] produces the list of its parsers' @|Value|s}
- @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
- that matched}
- @item{@racket[switch] produces the @Value of the parser it chose}
+ @item{@racket[alt] produces the @Value of the parser that matched}
  @item{@racket[opt] produces its parser's @Value, or its default if its
  parser fails}
  @item{@racket[star] and @racket[plus] produce the list of their
@@ -155,16 +153,22 @@ The parsers made by this library pass positions in the input to one
 ((rx #rx"a|b") "xb")
 ]}
 
-@defproc[(span [ok? (-> char? any/c)]) #,Parser]{
+@defproc[(span [ok? (or/c (-> char? any/c) string?)]) #,Parser]{
  produces a @Parser that matches the longest run of one or more
- characters at the start of its input that @racket[ok?] accepts. It
- fails if the first character isn't accepted, or if there is no input
- left. The @Value is the matched text.
+ characters at the start of its input that @racket[ok?] accepts, or,
+ when @racket[ok?] is a string, that are in it. It fails if the first
+ character isn't accepted, or if there is no input left. The @Value is
+ the matched text.
 
 @examples[#:eval parse-eval
 ((span char-alphabetic?) "abc123")
 ((span char-numeric?) "abc")
+((span "01") "0110 2")
 ]
+
+ Given a string, @racket[span] knows which characters it can start
+ with, so @racket[alt] can skip it when the next character isn't one of
+ them. Given a function, it can't know.
 
  A @racket[span] matches the same text as an @racket[rx] for a character
  class, such as @racket[(rx #rx"[a-z]+")], but costs less when the runs
@@ -228,19 +232,21 @@ The parsers made by this library pass positions in the input to one
 ((seq (lit "a") (lit "b")) "acb")
 ]}
 
-@defproc[(alt [p1 #,Parser] [p2 #,Parser]) #,Parser]{
- produces a @Parser that tries @racket[p1] and, only if it fails,
- tries @racket[p2] on the same input.
+@defproc[(alt [p #,Parser] ...) #,Parser]{
+ produces a @Parser that tries each @racket[p] in order, on the same
+ input, and behaves like the first one that matches. It fails if none
+ does, so with no parsers it always fails.
 
 @examples[#:eval parse-eval
 ((alt (lit "a") (lit "b")) "bc")
 ((alt (lit "a") (lit "b")) "c")
+((alt (lit "x") (lit "y") (lit "z")) "zebra")
 ]
 
- The choice is @emph{ordered} and final: once @racket[p1] matches,
- @racket[alt] never goes back to try @racket[p2], even if the rest of
- the grammar then fails. When one alternative is a prefix of another,
- list the longer one first.
+ The choice is @emph{ordered} and final: once a @racket[p] matches,
+ @racket[alt] never goes back to try the ones after it, even if the
+ rest of the grammar then fails. When one alternative is a prefix of
+ another, list the longer one first.
 
 @examples[#:eval parse-eval
 (eval:error
@@ -248,51 +254,42 @@ The parsers made by this library pass positions in the input to one
         "abc"))
 (parse (seq (alt (lit "ab") (lit "a")) (lit "c"))
        "abc")
-]}
-
-@defproc[(alt* [p #,Parser] ...+) #,Parser]{
- produces a @Parser that tries each @racket[p] in order and behaves like
- the first one that matches. It is the same as nesting @racket[alt] to
- the right, and with a single parser @racket[(alt* p)] is the same as
- @racket[p].
-
-@examples[#:eval parse-eval
-((alt* (lit "x") (lit "y") (lit "z")) "zebra")
-]}
-
-@defform[#:literals (else)
-         (switch [(char ...) parser-expr] ...
-                 maybe-else)
-         #:grammar ([maybe-else (code:line)
-                                [else else-expr]])]{
- produces a @Parser that looks at the next character of its input without
- consuming it, and runs only the parser of the clause that lists that
- character. If no clause lists it, or no input is left, it runs the
- @racket[else] parser, or fails if there is none. Each @racket[char] is
- a character, and each @racket[parser-expr] and @racket[else-expr]
- produces a @|Parser|. They are evaluated once, when the
- @racket[switch] form is, not every time the parser runs. The @Value
- is the chosen parser's.
-
-@examples[#:eval parse-eval
-(define SIGNED
-  (switch [(#\+ #\-) (rx #px"[+-]\\d+")]
-          [else (rx #px"\\d+")]))
-(SIGNED "-12")
-(SIGNED "12")
 ]
 
- Unlike @racket[alt], @racket[switch] commits to the clause it
- chooses. If that parser fails, so does @racket[switch], without
- trying any other clause. It behaves like @racket[alt*] when each
- alternative can only start with the characters listed for it, and then
- it costs one @racket[case] on the next character, instead of trying
- each alternative in turn.
-
-@examples[#:eval parse-eval
-((alt (lit "ab") (lit "ac")) "ac")
-((switch [(#\a) (lit "ab")] [else (lit "ac")]) "ac")
-]}
+ Most parsers know which characters their matches can start with:
+ @racket[(lit "null")] can only start with @racket[#\n], for example.
+ @racket[alt] uses that to skip the alternatives that can't match the
+ next character, without running them. So when each alternative starts
+ with its own characters, as the kinds of value in JSON do, only one of
+ them runs, however many there are. This never changes what
+ @racket[alt] matches, only how many alternatives it tries, and those it
+ tries are still tried in order. A parser knows what it can start with
+ by these rules:
+@itemlist[
+ @item{@racket[lit] starts with the first character of its string, and
+ @racket[(lit "")], like @racket[emp], matches without consuming
+ anything}
+ @item{@racket[span] given a string starts with one of its
+ characters}
+ @item{@racket[pmap] and @racket[seq] start with what their first
+ parser can, and if that can match without consuming anything, also
+ with what the next can, and so on}
+ @item{@racket[alt] starts with what any of its parsers can}
+ @item{@racket[opt] and @racket[star] start with what their parser can,
+ and can also match without consuming anything}
+ @item{@racket[plus] and @racket[where] start with what their parser
+ can, @racket[unwrap], @racket[preceded] and @racket[terminated] like
+ the @racket[pmap] they're made of, and a parser made by
+ @racket[define-parser] with what its body can}
+ @item{any other parser, such as an @racket[rx], a @racket[span] given a
+ function, a plain function, or a @racket[parser] made without a
+ @racket[start], could start with anything, so @racket[alt] always
+ tries it}
+]
+ @racket[alt] works out which alternatives to try for each character
+ the first time it runs, by when the whole grammar has been defined, so
+ a grammar can refer to itself.
+}
 
 @defproc[(opt [p #,Parser] [default any/c '()]) #,Parser]{
  produces a @Parser that behaves like @racket[p] if @racket[p] matches,
@@ -433,12 +430,20 @@ A @Run matches its string starting at the given position, and produces
  represents a successful match, as produced by a @Run that matches. See
  @|Match|.}
 
-@defstruct*[parser ([run #,Run])]{
- is a @Parser made from a @|Run|. Applying it to a string calls its
+@defform*[((parser run-expr)
+           (parser run-expr start-expr))
+          #:contracts ([run-expr #,Run]
+                       [start-expr (or/c start? #f (-> (or/c start? #f)))])]{
+ makes a @Parser from a @|Run|. Applying it to a string calls its
  @Run from position @racket[0], and turns the @Match into a @|Result|,
  copying the rest of the input once, for its @racket[_remaining]. The
  combinators in @racketmodname[parser-combinator/parse] call its @Run
  directly, with positions, so used inside a grammar it never copies.
+
+ @racket[parser] is syntax, not a procedure, so it can't be passed to
+ @racket[apply] or used as a value. Making the parser where its @Run is
+ written lets Racket's compiler see the @Run, and every parser runs
+ faster for it.
 
 @examples[#:eval positions-eval
 (code:comment "Char-Predicate -> Parser")
@@ -452,6 +457,46 @@ A @Run matches its string starting at the given position, and produces
          'error))))
 (parse (plus (char-where char-alphabetic?)) "abc")
 ((char-where char-numeric?) "7up")
+]
+
+ With a @racket[start], the parser tells @racket[alt] which characters
+ its matches can start with, as the combinators' parsers do. Without
+ one, or given @racket[#f], it could start with anything. A thunk is
+ called the first time it's needed, for a parser whose start depends on
+ parsers that may not be defined yet.
+
+@examples[#:eval positions-eval
+(define VOWEL
+  (parser
+   (lambda (s i)
+     (if (and (< i (string-length s))
+              (memv (string-ref s i) (list #\a #\e #\i #\o #\u)))
+         (matched (string (string-ref s i)) (add1 i))
+         'error))
+   (start (list #\a #\e #\i #\o #\u) #f)))
+((alt VOWEL (lit "y")) "yes")
+]}
+
+@defproc[(parser? [v any/c]) boolean?]{
+ returns @racket[#t] if @racket[v] was made by @racket[parser], or by
+ one of the combinators.}
+
+@defproc[(parser-run [p parser?]) #,Run]{
+ produces the @Run of @racket[p].}
+
+@defstruct*[start ([chars (listof char?)] [empty? boolean?])]{
+ says which characters a parser's matches can start with: one of
+ @racket[chars], or, if @racket[empty?] is true, none at all, because it
+ can also match without consuming anything.}
+
+@defproc[(start-of [p #,Parser]) (or/c start? #f)]{
+ produces the @racket[start] of @racket[p], or @racket[#f] if it could
+ start with anything, or if its start refers back to itself before it
+ consumes anything.
+
+@examples[#:eval positions-eval
+(start-chars (start-of (alt (lit "a") (seq (opt (lit "-")) (lit "1")))))
+(start-of (rx #rx"a"))
 ]}
 
 @defproc[(run [p #,Parser] [str string?] [i exact-nonnegative-integer?])

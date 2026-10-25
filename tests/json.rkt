@@ -4,6 +4,7 @@
 (require (only-in json string->jsexpr))
 (require "../parse.rkt")
 (require "../json.rkt")
+(require (submod "../parse.rkt" positions))
 
 ; STRING tests
 (check-equal? (parse STRING "\"Hello World\"")
@@ -140,6 +141,22 @@
               'null)
 (check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
               (list 1 2))
+
+; Start tests
+; Each kind of value begins with its own characters, so VALUE's alt runs
+; only one of them. A grammar change that loses a Start turns that off
+; without changing what parses, so these check them.
+; Parser -> (list String Boolean)
+(define (start-string p)
+  (let ([st (start-of p)])
+    (and st (list (list->string (sort (remove-duplicates (start-chars st)) char<?))
+                  (start-empty? st)))))
+(check-equal? (start-string VALUE) (list "\t\n\r \"-0123456789[fnt{" #f))
+(check-equal? (start-string NUMBER) (list "-0123456789" #f))
+(check-equal? (start-string STRING) (list "\"" #f))
+(check-equal? (start-string ARRAY) (list "\t\n\r [" #f))
+(check-equal? (start-string OBJECT) (list "\t\n\r {" #f))
+(check-equal? (start-string PAIR) (list "\t\n\r \"" #f))
 
 ; string->json tests
 (define rjson-string1 "\"\"")

@@ -41,18 +41,18 @@
 ; Matches a value with any whitespace around it. As in JSON's grammar,
 ; the whitespace between tokens belongs to the values, so it's looked
 ; for once: a value skips the whitespace on both sides, and the
-; punctuation around it skips none. The first character of a value says
-; what kind it is, so `switch` runs only that kind's parser, rather than
-; each being tried in turn.
+; punctuation around it skips none. Each kind of value begins with its
+; own characters, so `alt` runs only the parser for the kind the first
+; character says, rather than trying each in turn.
 (define-parser VALUE
   (unwrap SKIP-SPACE
-          (switch [(#\n) (pmap (const 'null) (lit "null"))]
-                  [(#\t) (pmap (const true) (lit "true"))]
-                  [(#\f) (pmap (const false) (lit "false"))]
-                  [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
-                  [(#\") STRING]
-                  [(#\[) ARRAY]
-                  [(#\{) OBJECT])
+          (alt (pmap (const 'null) (lit "null"))
+               (pmap (const true) (lit "true"))
+               (pmap (const false) (lit "false"))
+               NUMBER
+               STRING
+               ARRAY
+               OBJECT)
           SKIP-SPACE))
 
 ; Parser
@@ -66,12 +66,9 @@
                   (opt (alt (lit "+") (lit "-")))
                   DIGITS))))
 
-; Char -> Boolean
-(define (digit? c) (char<=? #\0 c #\9))
-
 ; Parser
 ; Matches a run of digits.
-(define DIGITS (span digit?))
+(define DIGITS (span "0123456789"))
 
 ; Parser
 ; Plain text is matched a run at a time with `span`, rather than a
@@ -80,29 +77,28 @@
 (define-parser STRING
   (pmap (lambda (open pieces close) (apply string-append pieces))
         (lit "\"")
-        (star (switch [(#\\) ESCAPE]
-                      [else (span string-char?)]))
+        (star (alt ESCAPE (span string-char?)))
         (lit "\"")))
 
 ; Parser
 ; Matches an escape sequence, producing the character it stands for as a
-; String. The backslash is matched once, and the letter after it chooses
-; the rest with `switch`, rather than each escape being tried in turn.
+; String. The backslash is matched once, and `alt` runs only the escape
+; that the letter after it begins, rather than trying each in turn.
 (define-parser ESCAPE
   ; String String -> Parser
   ; Matches the letter of an escape, producing the character it stands for.
   (let ([escaped (lambda (letter char) (pmap (const char) (lit letter)))])
     (pmap (lambda (backslash c) c)
           (lit "\\")
-          (switch [(#\") (escaped "\"" "\"")]
-                  [(#\\) (escaped "\\" "\\")]
-                  [(#\/) (escaped "/" "/")]
-                  [(#\b) (escaped "b" "\b")]
-                  [(#\f) (escaped "f" "\f")]
-                  [(#\n) (escaped "n" "\n")]
-                  [(#\r) (escaped "r" "\r")]
-                  [(#\t) (escaped "t" "\t")]
-                  [(#\u) UNICODE-ESCAPE]))))
+          (alt (escaped "\"" "\"")
+               (escaped "\\" "\\")
+               (escaped "/" "/")
+               (escaped "b" "\b")
+               (escaped "f" "\f")
+               (escaped "n" "\n")
+               (escaped "r" "\r")
+               (escaped "t" "\t")
+               UNICODE-ESCAPE))))
 
 ; Parser
 ; Matches the rest of a `\u` escape after its backslash, or of a UTF-16
@@ -140,7 +136,8 @@
                    [(hex-digit (string-ref s j))
                     => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
                    [else 'error]))
-           'error)))))
+           'error)))
+   (start (list #\u) #f)))
 
 ; Char -> [Maybe Natural]
 ; The value of `c` as a hexadecimal digit, or #f if it isn't one.
@@ -231,7 +228,8 @@
      (let loop ([j i])
        (if (and (< j (string-length s)) (json-space? (string-ref s j)))
            (loop (add1 j))
-           (matched '() j))))))
+           (matched '() j))))
+   (start (list #\space #\tab #\newline #\return) #t)))
 
 ; Char -> Boolean
 (define (json-space? c)
