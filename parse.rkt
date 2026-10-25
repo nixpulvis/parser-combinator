@@ -8,7 +8,7 @@
          rx
          span
          seq
-         seq*
+         fmap
          alt
          alt*
          switch
@@ -25,8 +25,9 @@
 ; A Value is whatever a parser produces:
 ; - `emp` produces '()
 ; - `lit`, `rx` and `span` produce the matched String
-; - `seq` and `seq*` produce whatever their constructor returns,
-;   given their parsers' Values
+; - `seq` produces the list of its parsers' Values
+; - `fmap` produces whatever its function returns, given its parser's
+;   Value, or the Values of the parsers in its `seq`
 ; - `alt` and `alt*` produce the Value of the parser that matched
 ; - `switch` produces the Value of the parser it chose
 ; - `opt` produces its parser's Value, or '() if its parser fails
@@ -155,39 +156,81 @@
                'error
                (matched (substring s i j) j)))))))
 
+; A SeqParser is a Parser that also keeps the parsers it runs, so `fmap`
+; can give their Values to its function as separate arguments.
+(struct seq-parser parser (parsers))
+
+; Parser ... -> Parser
+; Runs the parsers in order, each from where the last one's match ended,
+; and produces the list of their Values.
+(define (seq . ps)
+  (seq-parser (make-steps list ps) ps))
+
+; (Value ... -> Value) Parser -> Parser
+; Matches what `p` matches, producing `f` of its Value. When `p` is a
+; `seq`, `f` gets one argument per parser in it, rather than their list.
+; Either way, `f`'s arity is checked when the parser is made.
+(define (fmap f p)
+  (if (seq-parser? p)
+      (let ([ps (seq-parser-parsers p)])
+        (check-arity 'fmap f (length ps))
+        (parser (make-steps f ps)))
+      (begin
+        (check-arity 'fmap f 1)
+        (parser
+         (lambda (s i)
+           (let ([m (run p s i)])
+             (if (symbol? m)
+                 'error
+                 (matched (f (matched-value m)) (matched-end m)))))))))
+
 ; Symbol Any Natural -> Void
-; Raises an error for `who` unless `build` is a constructor that accepts
-; `n` Values.
-(define (check-constructor who build n)
-  (unless (and (procedure? build) (procedure-arity-includes? build n))
+; Raises an error for `who` unless `f` is a procedure that accepts `n`
+; Values.
+(define (check-arity who f n)
+  (unless (and (procedure? f) (procedure-arity-includes? f n))
     (raise-argument-error who
                           (format "(procedure-arity-includes/c ~a)" n)
-                          build)))
+                          f)))
 
-; (Value Value -> Value) Parser Parser -> Parser
-(define (seq build p1 p2)
-  (check-constructor 'seq build 2)
-  (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1)
+; (Value ... -> Value) [Listof Parser] -> Run
+; Runs `ps` in order, and calls `build` with their Values. Up to six
+; parsers, the common case, get a Run made for their number, which calls
+; `build` with the Values directly instead of collecting them in a list.
+(define (make-steps build ps)
+  (match ps
+    [(list) (lambda (s i) (matched (build) i))]
+    [(list a) (lambda (s i) (steps s i build () (a)))]
+    [(list a b) (lambda (s i) (steps s i build () (a b)))]
+    [(list a b c) (lambda (s i) (steps s i build () (a b c)))]
+    [(list a b c d) (lambda (s i) (steps s i build () (a b c d)))]
+    [(list a b c d e) (lambda (s i) (steps s i build () (a b c d e)))]
+    [(list a b c d e f) (lambda (s i) (steps s i build () (a b c d e f)))]
+    [_ (lambda (s i)
+         (let loop ([ps ps] [i i] [vs '()])
+           (if (null? ps)
+               (matched (apply build (reverse vs)) i)
+               (let ([m (run (car ps) s i)])
+                 (if (symbol? m)
+                     'error
+                     (loop (cdr ps)
+                           (matched-end m)
+                           (cons (matched-value m) vs)))))))]))
+
+; (steps s i build (v ...) (p ...)) : Match
+; Runs each `p` in order from position `i` of `s`, and then calls `build`
+; with the Values `v ...` followed by theirs. It only writes out the
+; nested `let`s for `make-steps`.
+(define-syntax steps
+  (syntax-rules ()
+    [(_ s i build (v ...) ())
+     (matched (build v ...) i)]
+    [(_ s i build (v ...) (p rest ...))
+     (let ([m (run p s i)])
+       (if (symbol? m)
            'error
-           (let ([m2 (run p2 s (matched-end m1))])
-             (if (symbol? m2)
-                 'error
-                 (matched (build (matched-value m1) (matched-value m2))
-                          (matched-end m2)))))))))
-
-; (Value ... -> Value) Parser Parser ... -> Parser
-; The constructor gets one Value per parser, collected into a list by
-; nesting `seq` with `cons`.
-(define (seq* build p . ps)
-  (check-constructor 'seq* build (add1 (length ps)))
-  (seq (lambda (v vs) (apply build v vs))
-       p
-       (foldr (lambda (p rest) (seq cons p rest))
-              (emp)
-              ps)))
+           (let ([x (matched-value m)] [j (matched-end m)])
+             (steps s j build (v ... x) (rest ...)))))]))
 
 ; Parser Parser -> Parser
 (define (alt p1 p2)
@@ -243,13 +286,14 @@
                   (lambda (s i)
                     (let ([m (run p s i)])
                       (if (and (matched? m) (> (matched-end m) i)) m 'error))))]
-           [self (alt (seq cons step (parser (lambda (s i) (run self s i))))
+           [self (alt (fmap cons
+                            (seq step (parser (lambda (s i) (run self s i)))))
                       (emp))])
     self))
 
 ; Parser -> Parser
 (define (plus p)
-  (seq cons p (star p)))
+  (fmap cons (seq p (star p))))
 
 ; Parser [Value -> Any] -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
@@ -261,4 +305,4 @@
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
-  (seq* (lambda (l b r) b) left body right))
+  (fmap (lambda (l b r) b) (seq left body right)))

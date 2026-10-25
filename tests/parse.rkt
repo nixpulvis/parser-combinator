@@ -56,7 +56,7 @@
               'error)
 (check-equal? ((span char-numeric?) "")
               'error)
-(check-equal? ((seq list (lit "x") (span char-numeric?)) "x42y")
+(check-equal? ((seq (lit "x") (span char-numeric?)) "x42y")
               (result (list "x" "42") "y"))
 
 ; alt tests
@@ -99,7 +99,7 @@
               (result "xyz" ""))
 (check-equal? (PICK "")
               (result '() ""))
-(check-equal? ((seq list (lit "(") PICK) "(ab)")
+(check-equal? ((seq (lit "(") PICK) "(ab)")
               (result (list "(" "ab") ")"))
 (check-equal? ((switch [(#\a) (lit "a")]) "b")
               'error)
@@ -129,44 +129,85 @@
            (λ () (expand-switch '([else (lit "b")] [(#\a) (lit "a")]))))
 
 ; seq tests
-(check-equal? ((seq list (lit "-") (lit "+")) "-+...")
+(check-equal? ((seq (lit "-") (lit "+")) "-+...")
               (result (list "-" "+") "..."))
-(check-equal? ((seq string-append (lit "-") (lit "+")) "-+...")
+(check-equal? ((seq (lit "-")) "-+")
+              (result (list "-") "+"))
+(check-equal? ((seq) "-+")
+              (result '() "-+"))
+(check-equal? ((seq (lit "-") (lit "+")) "+-...")
+              'error)
+(check-equal? ((seq (lit "-") (lit "+")) "--...")
+              'error)
+(check-equal? ((seq (lit "-") (lit "+") (lit ".")) "-+...")
+              (result (list "-" "+" ".") ".."))
+(check-equal? ((seq (lit "-") (lit "+") (lit ".")) "-+-")
+              'error)
+(check-equal? ((seq (lit "a") (lit "b") (lit "c") (lit "d")) "abcde")
+              (result (list "a" "b" "c" "d") "e"))
+; More than six parsers are run in a loop, rather than by a Run made for
+; their number.
+(define SEVEN (map lit (list "a" "b" "c" "d" "e" "f" "g")))
+(check-equal? ((apply seq SEVEN) "abcdefgh")
+              (result (list "a" "b" "c" "d" "e" "f" "g") "h"))
+(check-equal? ((apply seq SEVEN) "abcdefh")
+              'error)
+(check-equal? ((fmap string-append (apply seq SEVEN)) "abcdefgh")
+              (result "abcdefg" "h"))
+; seq is a procedure.
+(check-equal? ((apply seq (list (lit "a") (lit "b") (lit "c"))) "abcd")
+              (result (list "a" "b" "c") "d"))
+(check-equal? ((apply seq (list (lit "a") (lit "b"))) "ax")
+              'error)
+
+; fmap tests
+; With a parser that isn't a seq, the function gets its Value.
+(check-equal? ((fmap string->number (rx #px"\\d+")) "42!")
+              (result 42 "!"))
+(check-equal? ((fmap string->number (rx #px"\\d+")) "x")
+              'error)
+(check-equal? ((fmap length (star (lit "a"))) "aab")
+              (result 2 "b"))
+; With a seq, it gets one argument per parser in it.
+(check-equal? ((fmap string-append (seq (lit "-") (lit "+"))) "-+...")
               (result "-+" "..."))
-(check-equal? ((seq list (lit "-") (lit "+")) "+-...")
+(check-equal? ((fmap (lambda (l m r) m) (seq (lit "(") (lit "x") (lit ")"))) "(x)!")
+              (result "x" "!"))
+(check-equal? ((fmap list (seq (lit "-") (lit "+"))) "+-...")
               'error)
-(check-equal? ((seq list (lit "-") (lit "+")) "--...")
+(check-equal? ((fmap list (seq (lit "a") (lit "b") (lit "c") (lit "d"))) "abce")
               'error)
+(check-equal? ((fmap (const 'none) (seq)) "x")
+              (result 'none "x"))
+; whether or not the seq is written in the call.
+(define AB (seq (lit "a") (lit "b")))
+(check-equal? ((fmap string-append AB) "abc")
+              (result "ab" "c"))
+(check-equal? ((apply fmap (list string-append AB)) "abc")
+              (result "ab" "c"))
+; The function's arity is checked when the parser is made.
 (define (one a) a)
 (define (two a b) a)
-(check-exn (message-is "seq: contract violation\n"
-                       "  expected: (procedure-arity-includes/c 2)\n"
-                       "  given: #<procedure:one>")
-           (λ () (seq one (lit "-") (lit "+"))))
-(check-exn (message-is "seq: contract violation\n"
-                       "  expected: (procedure-arity-includes/c 2)\n"
+(check-exn (message-is "fmap: contract violation\n"
+                       "  expected: (procedure-arity-includes/c 1)\n"
+                       "  given: #<procedure:two>")
+           (λ () (fmap two (lit "-"))))
+(check-exn (message-is "fmap: contract violation\n"
+                       "  expected: (procedure-arity-includes/c 1)\n"
                        "  given: 'a")
-           (λ () (seq 'a (lit "-") (lit "+"))))
-
-; seq* tests
-(check-equal? ((seq* list (lit "-")) "-+")
-              (result (list "-") "+"))
-(check-equal? ((seq* list (lit "-") (lit "+") (lit ".")) "-+...")
-              (result (list "-" "+" ".") ".."))
-(check-equal? ((seq* (lambda (l m r) m) (lit "(") (lit "x") (lit ")")) "(x)!")
-              (result "x" "!"))
-(check-equal? ((seq* list (lit "-") (lit "+")) "+-...")
-              'error)
-(check-equal? ((seq* list (lit "-") (lit "+") (lit ".")) "-+-")
-              'error)
-(check-exn (message-is "seq*: contract violation\n"
+           (λ () (fmap 'a (lit "-"))))
+(check-exn (message-is "fmap: contract violation\n"
                        "  expected: (procedure-arity-includes/c 3)\n"
                        "  given: #<procedure:two>")
-           (λ () (seq* two (lit "-") (lit "+") (lit "."))))
-(check-exn (message-is "seq*: contract violation\n"
+           (λ () (fmap two (seq (lit "-") (lit "+") (lit ".")))))
+(check-exn (message-is "fmap: contract violation\n"
+                       "  expected: (procedure-arity-includes/c 2)\n"
+                       "  given: #<procedure:one>")
+           (λ () (fmap one AB)))
+(check-exn (message-is "fmap: contract violation\n"
                        "  expected: (procedure-arity-includes/c 2)\n"
                        "  given: 'a")
-           (λ () (seq* 'a (lit "-") (lit "+"))))
+           (λ () (fmap 'a (seq (lit "-") (lit "+")))))
 
 ; opt tests
 (check-equal? ((opt (lit "-")) "-123")
@@ -177,16 +218,16 @@
               (result '() ""))
 
 ; where tests
-(define NUMBER (seq* string->number (rx #px"\\d+")))
+(define NUMBER (fmap string->number (rx #px"\\d+")))
 (check-equal? ((where NUMBER even?) "42!")
               (result 42 "!"))
 (check-equal? ((where NUMBER even?) "41!")
               'error)
 (check-equal? ((where NUMBER even?) "x")
               'error)
-(check-equal? ((seq list (lit "#") (where NUMBER even?)) "#42!")
+(check-equal? ((seq (lit "#") (where NUMBER even?)) "#42!")
               (result (list "#" 42) "!"))
-(check-equal? ((seq list (lit "#") (where NUMBER even?)) "#41!")
+(check-equal? ((seq (lit "#") (where NUMBER even?)) "#41!")
               'error)
 (check-equal? ((alt (where (lit "ab") (const #f)) (lit "a")) "abc")
               (result "a" "bc"))
@@ -218,7 +259,7 @@
               (result (list "1" "2") "3"))
 (check-equal? ((star (alt (lit "1") (lit "2"))) "12")
               (result (list "1" "2") ""))
-(check-equal? ((star (seq list (lit "a") (lit "b"))) "abab")
+(check-equal? ((star (seq (lit "a") (lit "b"))) "abab")
               (result (list (list "a" "b") (list "a" "b")) ""))
 ; star stops at a match that consumes nothing, rather than looping.
 (check-equal? ((star (opt (lit "a"))) "aab")
@@ -241,9 +282,9 @@
 ; plain function parsers
 ; A plain function is given the rest of the input, and its `remaining`
 ; tells the combinators where its match ended.
-(check-equal? ((seq list (lit "ab") (lambda (s) (result s (substring s 1)))) "abcd")
+(check-equal? ((seq (lit "ab") (lambda (s) (result s (substring s 1)))) "abcd")
               (result (list "ab" "cd") "d"))
-(check-equal? ((seq list (lit "a") (lambda (s) 'error)) "ab")
+(check-equal? ((seq (lit "a") (lambda (s) 'error)) "ab")
               'error)
 
 ; positions tests
@@ -259,7 +300,7 @@
               (result "a" "b"))
 (check-equal? ((char-where char-alphabetic?) "1")
               'error)
-(check-equal? ((seq list (lit "1") (star (char-where char-alphabetic?))) "1ab2")
+(check-equal? ((seq (lit "1") (star (char-where char-alphabetic?))) "1ab2")
               (result (list "1" (list "a" "b")) "2"))
 (check-equal? (run (lit "b") "ab" 1)
               (matched "b" 2))
@@ -274,7 +315,7 @@
             (set! seen (cons s i))
             (matched '() i))))
 (define spied "ab!")
-(check-equal? (begin ((seq list (lit "ab") spy) spied)
+(check-equal? (begin ((seq (lit "ab") spy) spied)
                      (and (eq? (car seen) spied) (cdr seen)))
               2)
 

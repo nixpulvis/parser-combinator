@@ -75,7 +75,7 @@ An empty JSON array is @racket['()] and an empty JSON object is
 
 The grammar behind @racket[string->json] is made of the parsers below.
  @racket[SPACE] matches whitespace, and its @Value is the matched text.
- The rest produce the @JSON itself, using @racket[seq] and @racket[seq*]
+ The rest produce the @JSON itself, using @racket[fmap]
  constructors: @racket[NUMBER], @racket[STRING], @racket[ARRAY], and
  @racket[OBJECT] for those kinds of value, @racket[PAIR] for one name and
  value in an object, and @racket[VALUE] for any JSON value. These parsers
