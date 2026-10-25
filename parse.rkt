@@ -100,8 +100,8 @@
           [else
            (matched-value m)])))
 
-; Parser -> Parser : Transformation
-; Makes things lazy. The body is built the first time the parser runs,
+; (define-parser name body)
+; Defines `name` as the parser `body`, built the first time it runs
 ; rather than every time, so a grammar isn't rebuilt as it parses.
 (define-syntax-rule (define-parser name body)
   (define name
@@ -109,6 +109,10 @@
       (parser (lambda (s i)
                 (unless p (set! p body))
                 (run p s i))))))
+
+; The combinators from `emp` to `where` are the kernel. Each has its own
+; Run, and the speed is all in these. The ones after `where` are made
+; from the kernel's.
 
 ; -> Parser
 (define (emp)
@@ -167,12 +171,6 @@
     (unless (and (procedure? f) (procedure-arity-includes? f n))
       (raise-argument-error 'pmap (format "(procedure-arity-includes/c ~a)" n) f))
     (parser (all-of f ps))))
-
-; Parser Parser ... -> Parser
-; Runs the parsers in order, as `pmap` does, and produces the list of
-; their Values.
-(define (seq p . ps)
-  (apply pmap list p ps))
 
 ; Natural
 ; The most parsers `all-of` writes a Run out for, with `steps`. Longer
@@ -269,12 +267,6 @@
      (let ([m1 (run p1 s i)])
        (if (symbol? m1) (run p2 s i) m1)))))
 
-; Parser Parser ... -> Parser
-(define (alt* p . ps)
-  (if (empty? ps)
-      p
-      (alt p (apply alt* ps))))
-
 ; (switch [(Char ...) Parser] ...) : Parser
 ; (switch [(Char ...) Parser] ... [else Parser]) : Parser
 ; Looks at the next character without consuming it, and runs only the
@@ -304,10 +296,6 @@
      #'(switch [(c ...) p] ... [else (parser (lambda (s i) 'error))])]))
 
 ; Parser -> Parser
-(define (opt p)
-  (alt p (emp)))
-
-; Parser -> Parser
 ; Stops when `p` fails, or matches without consuming input, which would
 ; otherwise repeat forever. The parser is built once, and refers to
 ; itself for each further match.
@@ -322,10 +310,6 @@
                       (emp))])
     self))
 
-; Parser -> Parser
-(define (plus p)
-  (pmap cons p (star p)))
-
 ; Parser [Value -> Any] -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
 (define (where p ok?)
@@ -333,6 +317,28 @@
    (lambda (s i)
      (let ([m (run p s i)])
        (if (and (matched? m) (ok? (matched-value m))) m 'error)))))
+
+; The combinators below are made from the kernel's.
+
+; Parser Parser ... -> Parser
+; Runs the parsers in order, as `pmap` does, and produces the list of
+; their Values.
+(define (seq p . ps)
+  (apply pmap list p ps))
+
+; Parser Parser ... -> Parser
+(define (alt* p . ps)
+  (if (empty? ps)
+      p
+      (alt p (apply alt* ps))))
+
+; Parser -> Parser
+(define (opt p)
+  (alt p (emp)))
+
+; Parser -> Parser
+(define (plus p)
+  (pmap cons p (star p)))
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
