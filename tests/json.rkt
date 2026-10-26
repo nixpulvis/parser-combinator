@@ -76,6 +76,20 @@
 ; time, is still exact.
 (check-equal? (parse NUMBER (make-string 1000 #\9))
               (sub1 (expt 10 1000)))
+; Up to a scale of 10000 either way, a number is exact. Beyond it, it's
+; the nearest float, even when its digits bring it back into range.
+(check-equal? (parse NUMBER "1e10000")
+              (expt 10 10000))
+(check-equal? (parse NUMBER "1e-10000")
+              (/ (expt 10 10000)))
+(check-equal? (parse NUMBER "1e10001")
+              +inf.0)
+(check-equal? (parse NUMBER "-1.5e1000000000")
+              -inf.0)
+(check-equal? (parse NUMBER "1e-1000000000")
+              0.0)
+(check-equal? (parse NUMBER (string-append "4" (make-string 20000 #\0) "e-20001"))
+              0.4)
 (check-exn exn:fail? (λ () (parse NUMBER "1e")))
 (check-exn exn:fail? (λ () (parse NUMBER "1e+")))
 (check-exn exn:fail? (λ () (parse NUMBER "1.")))
