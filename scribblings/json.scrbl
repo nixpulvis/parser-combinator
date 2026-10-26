@@ -28,7 +28,8 @@ A @JSON is one of:
 @itemlist[
  @item{@racket['null], for @tt{null}}
  @item{a @racket[boolean?], for @tt{true} and @tt{false}}
- @item{an exact @racket[number?], for a JSON number}
+ @item{a @racket[number?], for a JSON number, exact unless it's scaled
+ by a power of 10 beyond 10000 either way}
  @item{a @racket[string?], for a JSON string}
  @item{a @racket[(listof #,JSON)], for a JSON array, an ordered
  collection of values}
@@ -99,11 +100,19 @@ The grammar behind @racket[string->json] is made of the parsers below.
  by one or more digits. The exponent is an @tt{e} or @tt{E}, an optional
  @tt{+} or @tt{-}, and one or more digits.
 
- It produces the number as an exact number.
+ It produces the number as an exact number: the digits, scaled by the
+ power of 10 the exponent and fraction give. Building an exact number
+ takes time and memory in proportion to that power, so beyond 10000
+ either way, @racket[NUMBER] produces the nearest float instead, as
+ @racket[string->jsexpr] does for every number with a fraction or
+ exponent. RFC 8259 allows a parser to limit the numbers it reads
+ exactly.
 
 @examples[#:eval json-eval
 (parse NUMBER "7")
 (parse NUMBER "-1.5e2")
+(parse NUMBER "1e10001")
+(parse NUMBER "-2e-99999")
 (eval:error (parse NUMBER "1."))
 ]}
 

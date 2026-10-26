@@ -51,15 +51,50 @@
                   [(#\{) OBJECT])))
 
 ; Parser
+; The value is the exact number the text names: the integer and fraction
+; digits as one integer, scaled by a power of 10. Building it takes time
+; and memory in proportion to the scale, so a short text like
+; 1e1000000000 could run out of memory. Beyond `exact-scale`, the value
+; is the nearest float instead, as `string->jsexpr` would give, which
+; RFC 8259 section 6 allows.
 (define-parser NUMBER
-  (pmap (lambda parts
-          (string->number (apply string-append "#e" (flatten parts))))
+  (pmap (lambda (sign int frac exponent)
+          (let ([digits (string-append int frac)]
+                [scale (- exponent (string-length frac))])
+            (if (<= (abs scale) exact-scale)
+                (let ([n (* (digits->natural digits) (expt 10 scale))])
+                  (if (null? sign) n (- n)))
+                (string->number (string-append (if (null? sign) "" "-")
+                                               digits "e" (number->string scale))
+                                10 'number-or-false 'decimal-as-inexact))))
         (opt (lit "-"))
         (alt (lit "0") DIGITS)
-        (opt (seq (lit ".") DIGITS))
-        (opt (seq (alt (lit "e") (lit "E"))
-                  (opt (alt (lit "+") (lit "-")))
-                  DIGITS))))
+        (alt (pmap (lambda (dot digits) digits) (lit ".") DIGITS)
+             (lit ""))
+        (alt (pmap (lambda (e sign digits)
+                     (if (equal? sign "-")
+                         (- (digits->natural digits))
+                         (digits->natural digits)))
+                   (alt (lit "e") (lit "E"))
+                   (opt (alt (lit "+") (lit "-")))
+                   DIGITS)
+             (pmap (const 0) (emp)))))
+
+; Natural
+; The largest power of 10, up or down, that NUMBER scales an exact number
+; by. Past it, NUMBER produces a float.
+(define exact-scale 10000)
+
+; String -> Natural
+; The value of a string of decimal digits. Adding up one digit at a time
+; is fastest for the short numbers JSON usually holds, but it multiplies
+; a growing number for every digit, so past 64 digits `string->number`
+; is faster.
+(define (digits->natural str)
+  (if (<= (string-length str) 64)
+      (for/fold ([n 0]) ([c (in-string str)])
+        (+ (* n 10) (- (char->integer c) (char->integer #\0))))
+      (string->number str)))
 
 ; Char -> Boolean
 (define (digit? c) (char<=? #\0 c #\9))
