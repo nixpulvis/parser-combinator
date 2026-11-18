@@ -87,17 +87,16 @@
   ; String String -> Parser
   ; Matches the letter of an escape, producing the character it stands for.
   (let ([escaped (lambda (letter char) (pmap (const char) (lit letter)))])
-    (pmap (lambda (backslash c) c)
-          (lit "\\")
-          (switch [(#\") (escaped "\"" "\"")]
-                  [(#\\) (escaped "\\" "\\")]
-                  [(#\/) (escaped "/" "/")]
-                  [(#\b) (escaped "b" "\b")]
-                  [(#\f) (escaped "f" "\f")]
-                  [(#\n) (escaped "n" "\n")]
-                  [(#\r) (escaped "r" "\r")]
-                  [(#\t) (escaped "t" "\t")]
-                  [(#\u) UNICODE-ESCAPE]))))
+    (preceded (lit "\\")
+              (switch [(#\") (escaped "\"" "\"")]
+                      [(#\\) (escaped "\\" "\\")]
+                      [(#\/) (escaped "/" "/")]
+                      [(#\b) (escaped "b" "\b")]
+                      [(#\f) (escaped "f" "\f")]
+                      [(#\n) (escaped "n" "\n")]
+                      [(#\r) (escaped "r" "\r")]
+                      [(#\t) (escaped "t" "\t")]
+                      [(#\u) UNICODE-ESCAPE]))))
 
 ; Parser
 ; Matches the rest of a `\u` escape after its backslash, or of a UTF-16
@@ -112,9 +111,7 @@
                                              surrogate-bits)
                            (- low first-low-surrogate)))))
              (where CODE-UNIT high-surrogate?)
-             (pmap (lambda (backslash low) low)
-                   (lit "\\")
-                   (where CODE-UNIT low-surrogate?)))
+             (preceded (lit "\\") (where CODE-UNIT low-surrogate?)))
        (pmap (lambda (n)
                (string (if (surrogate? n)
                            replacement-character
@@ -198,12 +195,7 @@
 ; Matches zero or more `p`s separated by commas, producing the list of
 ; their values.
 (define (comma-separated p)
-  (alt (pmap cons
-             p
-             (star (pmap (lambda (comma x) x)
-                         (spacey (lit ","))
-                         p)))
-       (emp)))
+  (opt (pmap cons p (star (preceded (spacey (lit ",")) p)))))
 
 ; Parser
 ; Matches one or more whitespace characters.
