@@ -132,8 +132,8 @@ The grammar behind @racket[string->json] is made of the parsers below:
 
 @defthing[ARRAY #,Parser]{
  matches a JSON array, that is, zero or more @racket[VALUE]s separated by
- commas and surrounded by brackets. It produces the list of values, in
- order.
+ commas and surrounded by brackets, along with the whitespace around it.
+ It produces the list of values, in order.
 
 @examples[#:eval json-eval
 (parse ARRAY "[true, false]")
@@ -141,8 +141,9 @@ The grammar behind @racket[string->json] is made of the parsers below:
 
 @defthing[OBJECT #,Parser]{
  matches a JSON object, that is, zero or more @racket[PAIR]s separated by
- commas and surrounded by braces. It produces an immutable
- @racket[hasheq] from the name of each @racket[PAIR] to its value.
+ commas and surrounded by braces, along with the whitespace around it. It
+ produces an immutable @racket[hasheq] from the name of each
+ @racket[PAIR] to its value.
 
 @examples[#:eval json-eval
 (parse OBJECT "{}")
@@ -152,15 +153,19 @@ The grammar behind @racket[string->json] is made of the parsers below:
 
 @defthing[PAIR #,Parser]{
  matches one name and value in a JSON object, such as
- @tt{"name": true}, and produces a pair of the name, as a symbol, and the
- value, as produced by @racket[VALUE].
+ @tt{"name": true}, along with the whitespace around it, and produces a
+ pair of the name, as a symbol, and the value, as produced by
+ @racket[VALUE].
 
 @examples[#:eval json-eval
 (code:comment "\"a\": true")
 (parse PAIR "\"a\": true")
 ]}
 
-Wherever the grammar allows whitespace around a value or a punctuation
- mark, the parsers skip any whitespace there, without copying it.
- Whitespace is any of @racket[#\space], @racket[#\tab],
- @racket[#\newline], and @racket[#\return].
+As in JSON's own grammar, whitespace belongs to the values:
+ @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and @racket[PAIR] each
+ skip the whitespace around themselves, and the punctuation between them
+ skips none, so the whitespace between two tokens is looked at once.
+ They don't copy the whitespace they skip. Whitespace is any of
+ @racket[#\space], @racket[#\tab], @racket[#\newline], and
+ @racket[#\return].
