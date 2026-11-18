@@ -336,6 +336,29 @@
               (result (list "aa") "b"))
 (check-equal? ((plus (opt (lit "a"))) "b")
               (result (list '()) "b"))
+; star matches what its definition by recursion does: a `p` that
+; consumes something and then the rest, or else nothing.
+(define (star-by-recursion p)
+  (letrec ([consuming (parser
+                       (lambda (s i)
+                         (let ([m (run p s i)])
+                           (if (and (matched? m) (> (matched-end m) i))
+                               m
+                               'error))))]
+           [self (alt (pmap cons
+                            consuming
+                            (parser (lambda (s i) (run self s i))))
+                      (emp))])
+    self))
+(for* ([p (list (lit "a")
+                (alt (lit "a") (lit "bb"))
+                (opt (lit "a"))
+                (rx #rx"a*")
+                (seq (lit "a") (opt (lit "b"))))]
+       [str (list "" "a" "aaa" "aab" "abab" "aba" "abba" "b" "bbbb")])
+  (check-equal? ((star p) str)
+                ((star-by-recursion p) str)
+                (format "star on ~s" str)))
 
 ; unwrap tests
 (check-equal? ((unwrap (lit "+") (lit "!") (lit "+")) "+!+")
