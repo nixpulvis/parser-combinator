@@ -17,7 +17,7 @@ raco pkg install parser-combinator
 (require parser-combinator/parse)
 
 (define-parser GREETING
-  (seq list (lit "hello ") (alt (lit "world") (lit "racket"))))
+  (seq (lit "hello ") (alt (lit "world") (lit "racket"))))
 
 (parse GREETING "hello world")
 ;=> '("hello " "world")
