@@ -8,8 +8,7 @@
          STRING
          ARRAY
          OBJECT
-         PAIR
-         SPACE)
+         PAIR)
 
 ; ----------------------
 ; ----- JSON Values -----
@@ -198,14 +197,10 @@
   (opt (pmap cons p (star (preceded (spacey (lit ",")) p)))))
 
 ; Parser
-; Matches one or more whitespace characters.
-(define-parser SPACE
-  (span json-space?))
-
-; Char -> Boolean
-(define (json-space? c)
-  (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
+; Matches zero or more whitespace characters, producing '(). It moves
+; past the whitespace without copying it.
+(define SKIP-SPACE (skip " \t\n\r"))
 
 ; Parser -> Parser
 (define (spacey l)
-  (unwrap (opt SPACE) l (opt SPACE)))
+  (unwrap SKIP-SPACE l SKIP-SPACE))
