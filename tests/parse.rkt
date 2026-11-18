@@ -56,8 +56,33 @@
               'error)
 (check-equal? ((span char-numeric?) "")
               'error)
+; Given a String, it matches the characters in it, outside ASCII too.
+(check-equal? ((span "01") "0110 2")
+              (result "0110" " 2"))
+(check-equal? ((span "01") "2")
+              'error)
+(check-equal? ((span "aé") "aéab!")
+              (result "aéa" "b!"))
 (check-equal? ((seq (lit "x") (span char-numeric?)) "x42y")
               (result (list "x" "42") "y"))
+
+; skip tests
+(check-equal? ((skip " \t") " \t x")
+              (result '() "x"))
+(check-equal? ((skip " \t") "x")
+              (result '() "x"))
+(check-equal? ((skip " \t") "")
+              (result '() ""))
+(check-equal? ((skip char-numeric?) "42x")
+              (result '() "x"))
+(check-equal? ((seq (lit "[") (skip " ") (lit "]")) "[  ]")
+              (result (list "[" '() "]") ""))
+; skip matches what an optional span does, with '() for its Value.
+(for* ([ok? (list " \t" "aé" char-numeric?)]
+       [str (list "" " " " \t x" "x \t" "aéab!" "42x" "x42" "é")])
+  (check-equal? ((skip ok?) str)
+                ((pmap (const '()) (opt (span ok?))) str)
+                (format "skip ~s on ~s" ok? str)))
 
 ; alt tests
 (check-equal? ((alt (lit "+") (lit "-")) "+123")
