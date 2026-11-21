@@ -191,6 +191,9 @@
         (spacey (lit ":"))
         VALUE))
 
+; TODO: Write comma-separated with sep-by* or sep-by+, once the open
+; whitespace changes to it have landed.
+
 ; Parser -> Parser
 ; Matches zero or more `p`s separated by commas, producing the list of
 ; their values.

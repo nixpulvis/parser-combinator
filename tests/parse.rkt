@@ -283,6 +283,33 @@
 (check-equal? ((terminated (lit "4") (lit "%")) "%")
               'error)
 
+; sep-by* and sep-by+ tests
+(check-equal? ((sep-by* (lit "a") (lit ",")) "a,a,ab")
+              (result (list "a" "a" "a") "b"))
+(check-equal? ((sep-by* (lit "a") (lit ",")) "b")
+              (result '() "b"))
+(check-equal? ((sep-by* (lit "a") (lit ",")) "")
+              (result '() ""))
+; A separator with no `p` after it is left in the input.
+(check-equal? ((sep-by* (lit "a") (lit ",")) "a,a,")
+              (result (list "a" "a") ","))
+(check-equal? ((sep-by* (lit "a") (lit ",")) ",a")
+              (result '() ",a"))
+(check-equal? ((sep-by+ (lit "a") (lit ",")) "a,a")
+              (result (list "a" "a") ""))
+(check-equal? ((sep-by+ (lit "a") (lit ",")) "a")
+              (result (list "a") ""))
+(check-equal? ((sep-by+ (lit "a") (lit ",")) "b")
+              'error)
+(check-equal? ((sep-by+ (lit "a") (lit ",")) "")
+              'error)
+; sep-by* is opt of sep-by+, and sep-by+ is p then star of sep and p.
+(for ([s (in-list '("" "a" "a,a" "a,a," ",a" "a;a" "aa,a"))])
+  (check-equal? ((sep-by* (lit "a") (lit ",")) s)
+                ((opt (sep-by+ (lit "a") (lit ","))) s))
+  (check-equal? ((sep-by+ (lit "a") (lit ",")) s)
+                ((pmap cons (lit "a") (star (preceded (lit ",") (lit "a")))) s)))
+
 ; plain function parsers
 ; A plain function is given the rest of the input, and its `remaining`
 ; tells the combinators where its match ended.
