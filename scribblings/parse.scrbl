@@ -54,6 +54,8 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  @item{@racket[unwrap] produces the @Value of its middle parser}
  @item{@racket[preceded] and @racket[terminated] produce the @Value of
  the parser they don't skip}
+ @item{@racket[sep-by*] and @racket[sep-by+] produce the list of their
+ parser's @|Value|s, without the separators'}
 ]
 The functions given to @racket[pmap] are where a grammar builds the data
  the program needs, such as a number, or a structure of its own.
@@ -395,37 +397,37 @@ The parsers made by this library pass positions in the input to one
  @tt{terminated} in Rust's nom library, which calls @racket[unwrap]
  @tt{delimited}.}
 
-@defproc[(sep-by [p #,Parser] [sep #,Parser]) #,Parser]{
+@defproc[(sep-by* [p #,Parser] [sep #,Parser]) #,Parser]{
  produces a @Parser that matches @racket[p] zero or more times, with a
  @racket[sep] between each match. The @Value is the list of the
  @|Value|s of @racket[p]'s matches, in order, without @racket[sep]'s. It
- is the same as @racket[(opt (sep-by1 p sep))].
+ is the same as @racket[(opt (sep-by+ p sep))].
 
 @examples[#:eval parse-eval
 (define DIGITS (rx #px"\\d+"))
-(parse (sep-by DIGITS (lit ",")) "1,22,333")
-(parse (sep-by DIGITS (lit ",")) "")
+(parse (sep-by* DIGITS (lit ",")) "1,22,333")
+(parse (sep-by* DIGITS (lit ",")) "")
 ]
 
  Like @racket[star], it never gives back a match, so a @racket[sep]
  that isn't followed by a @racket[p] is left unmatched.
 
 @examples[#:eval parse-eval
-((sep-by DIGITS (lit ",")) "1,22,")
+((sep-by* DIGITS (lit ",")) "1,22,")
 ]}
 
-@defproc[(sep-by1 [p #,Parser] [sep #,Parser]) #,Parser]{
+@defproc[(sep-by+ [p #,Parser] [sep #,Parser]) #,Parser]{
  produces a @Parser that matches @racket[p] one or more times, with a
- @racket[sep] between each match, as @racket[sep-by] does. It is the
+ @racket[sep] between each match, as @racket[sep-by*] does. It is the
  same as @racket[(pmap cons p (star (preceded sep p)))].
 
 @examples[#:eval parse-eval
-(parse (sep-by1 DIGITS (lit ",")) "1,22")
-(eval:error (parse (sep-by1 DIGITS (lit ",")) ""))
+(parse (sep-by+ DIGITS (lit ",")) "1,22")
+(eval:error (parse (sep-by+ DIGITS (lit ",")) ""))
 ]
 
- The names and argument orders are those of @tt{sepBy} and
- @tt{sepBy1} in Haskell's Parsec library.}
+ The argument order is that of @tt{sepBy} and @tt{sepBy1} in Haskell's
+ Parsec library, and the names follow @racket[star] and @racket[plus].}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "run-parsers"]{Run Parsers}

@@ -19,8 +19,8 @@
          unwrap
          preceded
          terminated
-         sep-by
-         sep-by1)
+         sep-by*
+         sep-by+)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
@@ -41,7 +41,7 @@
 ; - `unwrap` produces the Value of its middle parser
 ; - `preceded` and `terminated` produce the Value of the parser they
 ;   don't skip
-; - `sep-by` and `sep-by1` produce the list of their parser's Values,
+; - `sep-by*` and `sep-by+` produce the list of their parser's Values,
 ;   without the separators'
 
 ; Parsers that match from a position in their input, rather than from
@@ -370,11 +370,11 @@
 ; Parser Parser -> Parser
 ; Matches one or more `p`s with a `sep` between each, producing the
 ; list of the `p`s' Values.
-(define (sep-by1 p sep)
+(define (sep-by+ p sep)
   (pmap cons p (star (preceded sep p))))
 
 ; Parser Parser -> Parser
-; Matches zero or more `p`s with a `sep` between each, as `sep-by1`
+; Matches zero or more `p`s with a `sep` between each, as `sep-by+`
 ; does, or else nothing, producing '().
-(define (sep-by p sep)
-  (opt (sep-by1 p sep)))
+(define (sep-by* p sep)
+  (opt (sep-by+ p sep)))
