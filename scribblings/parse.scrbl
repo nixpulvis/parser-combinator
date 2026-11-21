@@ -407,7 +407,11 @@ The parsers made by this library pass positions in the input to one
 (define DIGITS (rx #px"\\d+"))
 (parse (sep-by* DIGITS (lit ",")) "1,22,333")
 (parse (sep-by* DIGITS (lit ",")) "")
+(eval:error (parse (sep-by+ DIGITS (lit ",")) ""))
 ]
+
+ Unlike @racket[sep-by+], it matches the empty string, producing
+ @racket['()].
 
  Like @racket[star], it never gives back a match, so a @racket[sep]
  that isn't followed by a @racket[p] is left unmatched.
@@ -423,11 +427,8 @@ The parsers made by this library pass positions in the input to one
 
 @examples[#:eval parse-eval
 (parse (sep-by+ DIGITS (lit ",")) "1,22")
-(eval:error (parse (sep-by+ DIGITS (lit ",")) ""))
-]
-
- The argument order is that of @tt{sepBy} and @tt{sepBy1} in Haskell's
- Parsec library, and the names follow @racket[star] and @racket[plus].}
+(parse (sep-by+ DIGITS (lit ",")) "1")
+]}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "run-parsers"]{Run Parsers}
