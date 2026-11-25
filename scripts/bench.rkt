@@ -10,6 +10,10 @@
 ;                     [--group GROUP]... [--trials N] [--sizes N,...]
 ;                     [--plot FILE [--log-scale]] [ref ...]
 ;
+; Run it inside a checkout. Git finds the repository from the current
+; directory, and the refs, the working tree and the fixtures are that
+; repository's.
+;
 ; Each ref is a git commit, such as a branch, whose json.rkt is
 ; benchmarked from a temporary worktree, for example to check a branch for
 ; regressions against master. With no refs, the working tree is
@@ -43,7 +47,6 @@
          racket/list
          racket/math
          racket/path
-         racket/runtime-path
          racket/string)
 
 ; A Parser is a (cons String [String -> Any]), a label and a function that
@@ -184,7 +187,7 @@
                          (file->string (build-path fixtures file))))))))
 
 ; Real-world JSON files, shared with the tests.
-(define-runtime-path fixtures "../tests/fixtures")
+(define fixtures (build-path root "tests" "fixtures"))
 
 ; A Case is a (cons String [Natural -> String]), a name and a function
 ; that makes a JSON text of about the given size.
@@ -336,12 +339,10 @@
 (module git racket/base
   (require racket/file
            racket/list
-           racket/runtime-path
            racket/string
            racket/system)
-  (provide call-with-checkouts)
-
-  (define-runtime-path root "..")
+  (provide call-with-checkouts
+           root)
 
   ; [Listof String] Boolean [[Listof (cons String Path)] -> Any] -> Any
   ; Calls `proc` with a label and a checkout directory for each ref, using
@@ -426,6 +427,14 @@
            [ok? (parameterize ([current-output-port out]
                                [current-error-port out])
                   (apply system* (find-executable-path "git") "-C" dir args))])
-      (values ok? (get-output-string out)))))
+      (values ok? (get-output-string out))))
+
+  ; Path
+  ; The top of the working tree the script is run in, which git finds from
+  ; the current directory. Where this file is doesn't say: once it's
+  ; compiled, Racket finds that through the package's link, which can
+  ; point at another checkout.
+  (define root
+    (string->path (string-trim (git (current-directory) "rev-parse" "--show-toplevel")))))
 
 (require 'git)
