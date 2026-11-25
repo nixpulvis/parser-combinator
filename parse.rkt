@@ -7,43 +7,61 @@
          lit
          rx
          span
+         skip
          seq
-         seq*
+         pmap
          alt
-         alt*
-         switch
          opt
          star
          plus
          where
-         unwrap)
+         unwrap
+         preceded
+         terminated
+         sep-by*
+         sep-by+)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
 ; ----------------------------------------
 
 ; A Value is whatever a parser produces:
-; - `emp` produces '()
+; - `emp` produces its Value, '() unless it's given one
 ; - `lit`, `rx` and `span` produce the matched String
-; - `seq` and `seq*` produce whatever their constructor returns,
-;   given their parsers' Values
-; - `alt` and `alt*` produce the Value of the parser that matched
-; - `switch` produces the Value of the parser it chose
-; - `opt` produces its parser's Value, or '() if its parser fails
+; - `skip` produces '()
+; - `pmap` produces whatever its function returns, given its parsers'
+;   Values
+; - `seq` produces the list of its parsers' Values
+; - `alt` produces the Value of the parser that matched
+; - `opt` produces its parser's Value, or its default if its parser
+;   fails, '() unless it's given one
 ; - `star` and `plus` produce the list of their parser's Values
 ; - `where` produces its parser's Value, when its condition is met
 ; - `unwrap` produces the Value of its middle parser
+; - `preceded` and `terminated` produce the Value of the parser they
+;   don't skip
+; - `sep-by*` and `sep-by+` produce the list of their parser's Values,
+;   without the separators'
 
-; Parsers that match from a position in their input, rather than from
-; the start of a copy of what's left of it. The combinators below are
-; made this way. A parser written with these works with them without
-; copying the input. Require them with
-; (require (submod parser-combinator/parse positions)).
-(module positions racket/base
+; What the library itself knows about a parser: its Run, which the
+; `positions` module below shares with grammars, and its Start, which
+; stays in here. A grammar never writes a Start. Each combinator works
+; its own out from its parts, so `alt` can skip the alternatives that
+; can't match the next character.
+(module private racket/base
   (provide (struct-out result)
            (struct-out matched)
-           (struct-out parser)
-           run)
+           parser
+           parser?
+           parser-run
+           run
+           (struct-out start)
+           start-of
+           start-then
+           start-or
+           may-be-empty)
+
+  (require (for-syntax racket/base))
 
   ; A Result is one of:
   ; - 'error
@@ -67,13 +85,32 @@
   ; isn't copied while parsing. Applying a `parser` to a String runs it
   ; from position 0, and copies the rest of the input once, for the
   ; Result's `remaining`.
-  (struct parser (run)
+  ; A parser also has its Start, below, and an optional name, a Symbol or
+  ; #f, which is its `object-name`, so it prints as #<procedure:name>.
+  (struct parser (run [start #:mutable] name)
+    #:name parser-struct
+    #:constructor-name make-parser
+    #:property prop:object-name 2
     #:property prop:procedure
     (lambda (self s)
       (let ([m ((parser-run self) s 0)])
         (if (symbol? m)
             'error
             (result (matched-value m) (substring s (matched-end m)))))))
+
+  ; Run -> Parser
+  ; Run Start -> Parser
+  ; Run Start Name -> Parser
+  ; Makes a parser with the Start #f, or the given one, which can be a
+  ; thunk, and the name #f, or the given one. It's a macro so the struct
+  ; is made where the Run is written, which Racket's compiler can see
+  ; through. Made through a function instead, citm_catalog.json parses
+  ; about 30% slower.
+  (define-syntax (parser stx)
+    (syntax-case stx ()
+      [(_ run) #'(make-parser run #f #f)]
+      [(_ run st) #'(make-parser run st #f)]
+      [(_ run st name) #'(make-parser run st name)]))
 
   ; Parser String Natural -> Match
   ; Runs any Parser from position `i` of `s`. A Parser that is a plain
@@ -96,9 +133,97 @@
                 [else
                  (matched (result-value r)
                           (- (string-length s)
-                             (string-length (result-remaining r))))])))))
+                             (string-length (result-remaining r))))]))))
 
-(require 'positions)
+  ; A Start says which characters a parser's matches can begin with. It
+  ; is one of:
+  ; - #f, when it could be any character, or it isn't known
+  ; - (start [Listof Char] Boolean), when it can only be one of the
+  ;   Chars, and, if the Boolean is true, the parser can also match
+  ;   without consuming anything
+  ; So (start '() #t) is the Start of a parser that only matches nothing,
+  ; like `emp`, and (start '() #f) of one that never matches.
+  (struct start (chars empty?))
+
+  ; Any -> Start
+  ; The Start of `p`. A plain function's Start is #f, and so is that of a
+  ; parser with a Run written by hand. A grammar refers to parsers that
+  ; aren't defined yet, so a combinator gives its Start as a thunk, which
+  ; is called the first time the Start is needed and replaced by what it
+  ; returns. While a Start is being worked out it's #f, so a grammar that
+  ; refers to itself doesn't loop, and a Start worked out from it in the
+  ; meantime keeps #f. That only turns `alt`'s dispatch off for that
+  ; parser, so the tests check the JSON grammar's Starts.
+  ; NOTE: Mutation gains 1.15x speed in the escapes bench, over keeping a
+  ; thunk's Start in a promise made when the parser is.
+  (define (start-of p)
+    (if (parser? p)
+        (let ([st (parser-start p)])
+          (if (procedure? st)
+              (begin
+                (set-parser-start! p #f)
+                (let ([st (st)])
+                  (set-parser-start! p st)
+                  st))
+              st))
+        #f))
+
+  ; The Starts of the combinators are made from their parsers' with
+  ; these three.
+
+  ; Start [-> Start] -> Start
+  ; The Start of a parser with the Start `a`, followed by one whose Start
+  ; `rest` returns. It begins like the first, and, if the first can match
+  ; without consuming anything, like the second too. `rest` is only
+  ; called in that case, so a sequence doesn't ask for the Starts of the
+  ; parsers after the first one that must consume something.
+  (define (start-then a rest)
+    (cond [(not a) #f]
+          [(start-empty? a)
+           (let ([b (rest)])
+             (and b (start (append (start-chars a) (start-chars b))
+                           (start-empty? b))))]
+          [else a]))
+
+  ; Start Start -> Start
+  ; The Start of a choice between a parser with the Start `a` and one
+  ; with the Start `b`, which begins like either.
+  (define (start-or a b)
+    (and a b (start (append (start-chars a) (start-chars b))
+                    (or (start-empty? a) (start-empty? b)))))
+
+  ; Start -> Start
+  ; The Start of a parser that begins like one with the Start `a`, or
+  ; else matches without consuming anything.
+  (define (may-be-empty a)
+    (and a (start (start-chars a) #t))))
+
+; Parsers that match from a position in their input, rather than from
+; the start of a copy of what's left of it. The combinators below are
+; made this way. A parser written with these works with them without
+; copying the input. Require them with
+; (require (submod parser-combinator/parse positions)).
+(module positions racket/base
+  (provide (struct-out result)
+           (struct-out matched)
+           parser
+           parser?
+           parser-run
+           run)
+
+  (require (rename-in (submod ".." private) [parser parser-with-start]))
+
+  ; Run -> Parser
+  ; Run Name -> Parser
+  ; Makes a parser from a Run written by hand, with the name #f, or the
+  ; given one. `alt` always tries it, since it can't tell what such a
+  ; parser begins with.
+  (define-syntax parser
+    (syntax-rules ()
+      [(_ run) (parser-with-start run)]
+      [(_ run name) (parser-with-start run #f name)])))
+
+(require 'private)
 
 ; Parser String -> Value
 (define (parse p str)
@@ -111,21 +236,44 @@
           [else
            (matched-value m)])))
 
-; Parser -> Parser : Transformation
-; Makes things lazy. The body is built the first time the parser runs,
-; rather than every time, so a grammar isn't rebuilt as it parses.
+; (once x expr)
+; The value of the variable `x`, which is #f until this first sets it to
+; the value of `expr`. A grammar refers to parsers that aren't defined
+; yet, and to itself, so some work has to wait until the whole grammar
+; exists: `define-parser` builds its body, and `alt` its table of which
+; alternatives to try for each character. Both do it with this, the
+; first time they run, and keep the result.
+; NOTE: Setting a variable gains 1.05x to 1.1x speed in the canada.json
+; bench, and 1.3x to 1.35x in the escapes bench, over forcing a promise
+; on every run.
+(define-syntax-rule (once x expr)
+  (or x (begin (set! x expr) x)))
+
+; (define-parser name body)
+; Defines `name` as the parser `body`, built the first time it's needed.
+; The parser is named `name`.
 (define-syntax-rule (define-parser name body)
   (define name
-    (let ([p #f])
+    (let ([p #f]
+          [build (lambda () body)])
       (parser (lambda (s i)
-                (unless p (set! p body))
-                (run p s i))))))
+                (run (once p (build)) s i))
+              (lambda ()
+                (start-of (once p (build))))
+              'name))))
+
+; The combinators from `emp` to `where` are the kernel. Each has its own
+; Run, and the speed is all in these. The ones after `where` are made
+; from the kernel's.
 
 ; -> Parser
-(define (emp)
+; Value -> Parser
+; Matches without consuming anything, producing `v`.
+(define (emp [v '()])
   (parser
    (lambda (s i)
-     (matched '() i))))
+     (matched v i))
+   (start '() #t)))
 
 ; String -> Parser
 (define (lit str)
@@ -133,11 +281,15 @@
     (parser
      (lambda (s i)
        (if (and (<= (+ i len) (string-length s))
-                (for/and ([c (in-string str)]
-                          [d (in-string s i)])
-                  (char=? c d)))
+                (let loop ([k 0])
+                  (or (= k len)
+                      (and (char=? (string-ref str k) (string-ref s (+ i k)))
+                           (loop (add1 k))))))
            (matched str (+ i len))
-           'error)))))
+           'error))
+     (if (= len 0)
+         (start '() #t)
+         (start (list (string-ref str 0)) #f)))))
 
 ; Regexp -> Parser
 ; Matches `pattern` at the start of the input.
@@ -153,124 +305,295 @@
              (matched (substring s i (cdar m)) (cdar m))
              'error))))))
 
-; [Char -> Any] -> Parser
-; Matches the longest run of one or more characters that `ok?` accepts.
-; Unlike `rx`, it has no fixed cost per match, so it suits runs that are
-; often short, like whitespace.
+; (or/c [Char -> Any] String) -> Parser
+; Matches the longest run of one or more characters that `ok?` accepts,
+; or, given a String, that are in it. Unlike `rx`, it has no fixed cost
+; per match, so it suits runs that are often short, like whitespace.
 (define (span ok?)
   (parser
-   (lambda (s i)
-     (let loop ([j i])
-       (if (and (< j (string-length s)) (ok? (string-ref s j)))
-           (loop (add1 j))
-           (if (= j i)
-               'error
-               (matched (substring s i j) j)))))))
+   (scan ok? (s i j)
+     (if (= j i)
+         'error
+         (matched (substring s i j) j)))
+   (and (string? ok?) (start (string->list ok?) #f))))
 
-; Symbol Any Natural -> Void
-; Raises an error for `who` unless `build` is a constructor that accepts
-; `n` Values.
-(define (check-constructor who build n)
-  (unless (and (procedure? build) (procedure-arity-includes? build n))
-    (raise-argument-error who
-                          (format "(procedure-arity-includes/c ~a)" n)
-                          build)))
-
-; (Value Value -> Value) Parser Parser -> Parser
-(define (seq build p1 p2)
-  (check-constructor 'seq build 2)
+; (or/c [Char -> Any] String) -> Parser
+; Like `span`, but matches zero or more characters, and produces '()
+; rather than copying them, for text a grammar only skips over.
+(define (skip ok?)
   (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1)
-           'error
-           (let ([m2 (run p2 s (matched-end m1))])
-             (if (symbol? m2)
-                 'error
-                 (matched (build (matched-value m1) (matched-value m2))
-                          (matched-end m2)))))))))
+   (scan ok? (s i j)
+     (matched '() j))
+   (and (string? ok?) (start (string->list ok?) #t))))
+
+; (scan ok? (s i j) body) : Run
+; Makes a Run that finds where the run of characters that `ok?` accepts,
+; or that are in it, ends, from position `i` of `s`, and then evaluates
+; `body` with that position as `j`. Given a String, its ASCII characters
+; are looked up in a table. The loop is written out in each Run, not
+; called, so a Run that skips nothing costs no more than a check.
+(define-syntax-rule (scan ok? (s i j) body)
+  (if (string? ok?)
+      (let-values ([(ascii others) (char-table ok?)])
+        (lambda (s i)
+          (let ([j (let loop ([j i])
+                     (if (< j (string-length s))
+                         (let* ([c (string-ref s j)] [n (char->integer c)])
+                           (if (if (< n 128) (vector-ref ascii n) (memv c others))
+                               (loop (add1 j))
+                               j))
+                         j))])
+            body)))
+      (lambda (s i)
+        (let ([j (let loop ([j i])
+                   (if (and (< j (string-length s)) (ok? (string-ref s j)))
+                       (loop (add1 j))
+                       j))])
+          body))))
+
+; String -> (values [Vectorof Boolean] [Listof Char])
+; A table of which ASCII characters are in `str`, and its other
+; characters.
+(define (char-table str)
+  (let ([cs (string->list str)])
+    (values (build-vector 128 (lambda (n) (and (memv (integer->char n) cs) #t)))
+            (filter (lambda (c) (>= (char->integer c) 128)) cs))))
 
 ; (Value ... -> Value) Parser Parser ... -> Parser
-; The constructor gets one Value per parser, collected into a list by
-; nesting `seq` with `cons`.
-(define (seq* build p . ps)
-  (check-constructor 'seq* build (add1 (length ps)))
-  (seq (lambda (v vs) (apply build v vs))
-       p
-       (foldr (lambda (p rest) (seq cons p rest))
-              (emp)
-              ps)))
+; Runs the parsers in order, each from where the last one's match ended,
+; and produces `f` of their Values, one argument per parser, as `map`
+; calls its function with one element per list. With one parser, it
+; converts that parser's Value. Unless `f` accepts that many arguments,
+; it raises an error when the parser is made, before any input is parsed.
+(define (pmap f p . ps)
+  (let* ([ps (cons p ps)] [n (length ps)])
+    (unless (and (procedure? f) (procedure-arity-includes? f n))
+      (raise-argument-error 'pmap (format "(procedure-arity-includes/c ~a)" n) f))
+    (parser (all-of f ps)
+            (lambda () (seq-start ps)))))
 
-; Parser Parser -> Parser
-(define (alt p1 p2)
-  (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1) (run p2 s i) m1)))))
+; [Listof Parser] -> Start
+; A sequence can begin with what its first parser can, and, if that one
+; can match without consuming anything, with what the next one can, and
+; so on.
+(define (seq-start ps)
+  (if (null? ps)
+      (start '() #t)
+      (start-then (start-of (car ps))
+                  (lambda () (seq-start (cdr ps))))))
 
-; Parser Parser ... -> Parser
-(define (alt* p . ps)
-  (if (empty? ps)
-      p
-      (alt p (apply alt* ps))))
+; Natural
+; The most parsers `all-of` writes a Run out for, with `steps`. Longer
+; sequences use its loop. A written-out Run costs nothing to pick, since
+; `all-of` picks it once, when the parser is made, but each one adds to
+; the compiled code. Every sequence in the JSON grammar is shorter than
+; that. The tests run every length up to 20, so they cover the loop as
+; long as this stays below that.
+(define-for-syntax written-out 6)
 
-; (switch [(Char ...) Parser] ...) : Parser
-; (switch [(Char ...) Parser] ... [else Parser]) : Parser
-; Looks at the next character without consuming it, and runs only the
-; parser of the clause that lists it, or the `else` parser if no clause
-; does or there is no character left. If the chosen parser fails, so
-; does `switch`, without trying any other clause. That is like `alt`
-; for alternatives that can only start with the characters listed for
-; them, and costs one `case` instead of trying each alternative in turn.
-; Like the other combinators, it evaluates its parser expressions once,
-; when it is made, rather than every time it runs.
-(define-syntax (switch stx)
-  (syntax-case stx (else)
-    [(_ [(c ...) p] ... [else q])
-     (with-syntax ([(t ...) (generate-temporaries #'(p ...))])
-       #'(let ([t p] ... [otherwise q])
-           (parser
-            (lambda (s i)
-              (if (< i (string-length s))
-                  (case (string-ref s i)
-                    [(c ...) (run t s i)] ...
-                    [else (run otherwise s i)])
-                  (run otherwise s i))))))]
-    [(_ [(c ...) p] ...)
-     ; Without an `else`, a character no clause lists fails. Any other
-     ; shape, such as a misplaced `else`, matches neither rule and is a
-     ; syntax error, rather than being expanded again forever.
-     #'(switch [(c ...) p] ... [else (parser (lambda (s i) 'error))])]))
+; (Value ... -> Value) [Listof Parser] -> Run
+; Matches all of `ps`, in order, each from where the last one's match
+; ended, and calls `build` with their Values. It fails if any of them
+; does.
+;
+; The loop at the end does this for any number of parsers, but it
+; collects the Values in a list, then reverses it and applies `build` to
+; it, which allocates a list for every match. Most sequences are short,
+; so for up to `written-out` parsers `all-of` instead uses a Run written
+; for that number. That Run keeps each Value in a variable of its own and
+; calls `build` with them as plain arguments, so a match allocates no
+; list.
+(define (all-of build ps)
+  (or (written-out-run build ps)
+      (lambda (s i)
+        (let loop ([ps ps] [i i] [vs '()])
+          (if (null? ps)
+              (matched (apply build (reverse vs)) i)
+              (let ([m (run (car ps) s i)])
+                (if (symbol? m)
+                    'error
+                    (loop (cdr ps)
+                          (matched-end m)
+                          (cons (matched-value m) vs)))))))))
 
-; Parser -> Parser
-(define (opt p)
-  (alt p (emp)))
+; (written-out-run build ps) : (or/c Run #f)
+; The Run that `steps` writes out for as many parsers as `ps` has, or #f
+; when it has more than `written-out`. It expands to a `match` with a
+; case for each number of parsers from 1 to `written-out`, so for
+; `written-out` 2 it's
+;
+;   (match ps
+;     [(list p1) (lambda (s i) (steps s i build () (p1)))]
+;     [(list p1 p2) (lambda (s i) (steps s i build () (p1 p2)))]
+;     [_ #f])
+(define-syntax (written-out-run stx)
+  (syntax-case stx ()
+    [(_ build ps)
+     (with-syntax ([((p ...) ...)
+                    (for/list ([n (in-range 1 (add1 written-out))])
+                      (generate-temporaries (build-list n (lambda (k) 'p))))])
+       #'(match ps
+           [(list p ...) (lambda (s i) (steps s i build () (p ...)))]
+           ...
+           [_ #f]))]))
+
+; (steps s i build (v ...) (p ...)) : Match
+; Writes out the body of one of `all-of`'s Runs. It runs each `p` in
+; order, the first from position `i` of `s`, and fails as soon as one
+; does. Otherwise it calls `build` with the Values `v ...` followed by
+; the Values of the `p`s, and ends where the last `p` ended. `all-of`
+; starts it with no `v`s, and each step adds one. For example,
+; (steps s i build () (a b)) expands to
+;
+;   (let ([m (run a s i)])
+;     (if (symbol? m)
+;         'error
+;         (let ([x (matched-value m)] [j (matched-end m)])
+;           (let ([m (run b s j)])
+;             (if (symbol? m)
+;                 'error
+;                 (let ([x2 (matched-value m)] [j2 (matched-end m)])
+;                   (matched (build x x2) j2)))))))
+;
+; Each step's `x`, `j` and `m` are new variables, which `syntax-rules`
+; keeps apart, so no step's Value hides an earlier one's. They're
+; written `x2` and `j2` above to show that. It's a macro only so the
+; written-out Runs don't have to be written by hand.
+(define-syntax steps
+  (syntax-rules ()
+    [(_ s i build (v ...) ())
+     (matched (build v ...) i)]
+    [(_ s i build (v ...) (p rest ...))
+     (let ([m (run p s i)])
+       (if (symbol? m)
+           'error
+           (let ([x (matched-value m)] [j (matched-end m)])
+             (steps s j build (v ... x) (rest ...)))))]))
+
+; Parser ... -> Parser
+; Tries each parser in order, from the same position, and matches what
+; the first one to match does. It skips the parsers whose Start says
+; they can't match the next character, so when each alternative begins
+; with its own characters, it runs only one of them.
+(define (alt . ps)
+  (let ([choose #f])
+    (parser
+     (lambda (s i)
+       (((once choose (chooser ps)) s i) s i))
+     (lambda () (alt-start ps)))))
+
+; [Listof Parser] -> [String Natural -> Run]
+; Picks the Run that tries just the parsers in `ps` that could match from
+; position `i` of `s`, by the next character. A Run for each ASCII
+; character is kept in a vector, and for other characters in a hash.
+(define (chooser ps)
+  (let* ([sts (map start-of ps)]
+         [chars (remove-duplicates
+                 (append-map (lambda (st) (if st (start-chars st) '())) sts))]
+         ; [Maybe Char] -> Run
+         [for-char
+          (lambda (c)
+            (first-of (for/list ([p (in-list ps)] [st (in-list sts)]
+                                 #:when (or (not st)
+                                            (start-empty? st)
+                                            (and c (memv c (start-chars st)))))
+                        p)))]
+         [otherwise (for-char #f)]
+         [ascii (for/vector #:length 128 ([n (in-range 128)])
+                  (let ([c (integer->char n)])
+                    (if (memv c chars) (for-char c) otherwise)))]
+         [unicode (for/hasheqv ([c (in-list chars)]
+                                #:when (>= (char->integer c) 128))
+                    (values c (for-char c)))])
+    (lambda (s i)
+      (if (< i (string-length s))
+          (let ([n (char->integer (string-ref s i))])
+            (if (< n 128)
+                (vector-ref ascii n)
+                (hash-ref unicode (string-ref s i) (lambda () otherwise))))
+          otherwise))))
+
+; [Listof Parser] -> Run
+; Matches what the first of `ps` to match does.
+(define (first-of ps)
+  (cond [(null? ps) (lambda (s i) 'error)]
+        [(and (null? (cdr ps)) (parser? (car ps))) (parser-run (car ps))]
+        [else (lambda (s i)
+                (let loop ([ps ps])
+                  (if (null? ps)
+                      'error
+                      (let ([m (run (car ps) s i)])
+                        (if (symbol? m) (loop (cdr ps)) m)))))]))
+
+; [Listof Parser] -> Start
+; Alternatives can begin with what any of them can.
+(define (alt-start ps)
+  (for/fold ([st (start '() #f)]) ([p (in-list ps)])
+    (start-or st (start-of p))))
 
 ; Parser -> Parser
 ; Stops when `p` fails, or matches without consuming input, which would
-; otherwise repeat forever. The parser is built once, and refers to
-; itself for each further match.
+; otherwise repeat forever. The matches are collected in a loop, so a
+; long repetition doesn't nest a parser call per match.
 (define (star p)
-  (letrec ([step (parser
-                  (lambda (s i)
-                    (let ([m (run p s i)])
-                      (if (and (matched? m) (> (matched-end m) i)) m 'error))))]
-           [self (alt (seq cons step (parser (lambda (s i) (run self s i))))
-                      (emp))])
-    self))
+  (parser
+   (lambda (s i)
+     (let loop ([i i] [acc '()])
+       (let ([m (run p s i)])
+         (if (and (matched? m) (> (matched-end m) i))
+             (loop (matched-end m) (cons (matched-value m) acc))
+             (matched (reverse acc) i)))))
+   (lambda () (may-be-empty (start-of p)))))
 
-; Parser -> Parser
-(define (plus p)
-  (seq cons p (star p)))
-
-; Parser [Value -> Any] -> Parser
+; [Value -> Any] Parser -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
-(define (where p ok?)
+(define (where ok? p)
   (parser
    (lambda (s i)
      (let ([m (run p s i)])
-       (if (and (matched? m) (ok? (matched-value m))) m 'error)))))
+       (if (and (matched? m) (ok? (matched-value m))) m 'error)))
+   (lambda () (start-of p))))
+
+; The combinators below are made from the kernel's.
+
+; Parser Parser ... -> Parser
+; Runs the parsers in order, as `pmap` does, and produces the list of
+; their Values.
+(define (seq p . ps)
+  (apply pmap list p ps))
+
+; Parser -> Parser
+; Parser Value -> Parser
+; Matches what `p` matches, or else nothing, producing `default`.
+(define (opt p [default '()])
+  (alt p (emp default)))
+
+; Parser -> Parser
+(define (plus p)
+  (pmap cons p (star p)))
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
-  (seq* (lambda (l b r) b) left body right))
+  (pmap (lambda (l b r) b) left body right))
+
+; Parser Parser -> Parser
+; Matches `skipped` and then `p`, producing `p`'s Value.
+(define (preceded skipped p)
+  (pmap (lambda (_ v) v) skipped p))
+
+; Parser Parser -> Parser
+; Matches `p` and then `skipped`, producing `p`'s Value.
+(define (terminated p skipped)
+  (pmap (lambda (v _) v) p skipped))
+
+; Parser Parser -> Parser
+; Matches one or more `p`s with a `sep` between each, producing the
+; list of the `p`s' Values.
+(define (sep-by+ p sep)
+  (pmap cons p (star (preceded sep p))))
+
+; Parser Parser -> Parser
+; Matches zero or more `p`s with a `sep` between each, as `sep-by+`
+; does, or else nothing, producing '().
+(define (sep-by* p sep)
+  (opt (sep-by+ p sep)))
