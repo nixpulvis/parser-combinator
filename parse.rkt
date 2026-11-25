@@ -8,8 +8,8 @@
          rx
          span
          skip
-         seq
          pmap
+         seq
          alt
          opt
          star
