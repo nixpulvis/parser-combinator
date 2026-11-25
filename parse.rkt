@@ -121,9 +121,10 @@
     (parser
      (lambda (s i)
        (if (and (<= (+ i len) (string-length s))
-                (for/and ([c (in-string str)]
-                          [d (in-string s i)])
-                  (char=? c d)))
+                (let loop ([k 0])
+                  (or (= k len)
+                      (and (char=? (string-ref str k) (string-ref s (+ i k)))
+                           (loop (add1 k))))))
            (matched str (+ i len))
            'error)))))
 
