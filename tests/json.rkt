@@ -4,13 +4,7 @@
 (require (only-in json string->jsexpr))
 (require "../parse.rkt")
 (require "../json.rkt")
-
-; SPACE tests
-(check-equal? (parse SPACE " \t\n\r ")
-              " \t\n\r ")
-(check-exn exn:fail? (λ () (parse SPACE "")))
-(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
-              (list 1 2))
+(require (submod "../parse.rkt" private))
 
 ; STRING tests
 (check-equal? (parse STRING "\"Hello World\"")
@@ -72,6 +66,24 @@
               #e-1.23456)
 (check-equal? (parse NUMBER "1e5")
               100000)
+; A number longer than 64 digits, read without adding them up one at a
+; time, is still exact.
+(check-equal? (parse NUMBER (make-string 1000 #\9))
+              (sub1 (expt 10 1000)))
+; Up to a scale of 10000 either way, a number is exact. Beyond it, it's
+; the nearest float, even when its digits bring it back into range.
+(check-equal? (parse NUMBER "1e10000")
+              (expt 10 10000))
+(check-equal? (parse NUMBER "1e-10000")
+              (/ (expt 10 10000)))
+(check-equal? (parse NUMBER "1e10001")
+              +inf.0)
+(check-equal? (parse NUMBER "-1.5e1000000000")
+              -inf.0)
+(check-equal? (parse NUMBER "1e-1000000000")
+              0.0)
+(check-equal? (parse NUMBER (string-append "4" (make-string 20000 #\0) "e-20001"))
+              0.4)
 (check-exn exn:fail? (λ () (parse NUMBER "1e")))
 (check-exn exn:fail? (λ () (parse NUMBER "1e+")))
 (check-exn exn:fail? (λ () (parse NUMBER "1.")))
@@ -89,6 +101,8 @@
 (check-equal? (parse PAIR "\"foo\" : 123")
               (cons 'foo 123))
 (check-equal? (parse PAIR "\"foo\" \t: 123")
+              (cons 'foo 123))
+(check-equal? (parse PAIR " \"foo\" : 123 ")
               (cons 'foo 123))
 
 ; ARRAY tests
@@ -113,6 +127,8 @@
 
 ; OBJECT tests
 (check-equal? (parse OBJECT "{}")
+              (hasheq))
+(check-equal? (parse OBJECT " { \n } ")
               (hasheq))
 (check-equal? (parse OBJECT "{\"foo\":\"bar\"}")
               (hasheq 'foo "bar"))
@@ -141,6 +157,24 @@
               'null)
 (check-equal? (parse VALUE " \n null\t")
               'null)
+(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
+              (list 1 2))
+
+; Start tests
+; Each kind of value begins with its own characters, so VALUE's alt runs
+; only one of them. A grammar change that loses a Start turns that off
+; without changing what parses, so these check them.
+; Parser -> (list String Boolean)
+(define (start-string p)
+  (let ([st (start-of p)])
+    (and st (list (list->string (sort (remove-duplicates (start-chars st)) char<?))
+                  (start-empty? st)))))
+(check-equal? (start-string VALUE) (list "\t\n\r \"-0123456789[fnt{" #f))
+(check-equal? (start-string NUMBER) (list "-0123456789" #f))
+(check-equal? (start-string STRING) (list "\"" #f))
+(check-equal? (start-string ARRAY) (list "\t\n\r [" #f))
+(check-equal? (start-string OBJECT) (list "\t\n\r {" #f))
+(check-equal? (start-string PAIR) (list "\t\n\r \"" #f))
 
 ; string->json tests
 (define rjson-string1 "\"\"")
