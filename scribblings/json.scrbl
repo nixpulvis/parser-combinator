@@ -29,7 +29,7 @@ A @JSON is one of:
  @item{@racket['null], for @tt{null}}
  @item{a @racket[boolean?], for @tt{true} and @tt{false}}
  @item{a @racket[number?], for a JSON number, exact unless it's scaled
- by a power of 10 beyond 10000 either way}
+ beyond 10@superscript{±10000}}
  @item{a @racket[string?], for a JSON string}
  @item{a @racket[(listof #,JSON)], for a JSON array, an ordered
  collection of values}
@@ -80,6 +80,13 @@ The grammar behind @racket[string->json] is made of the parsers below:
  object, and @racket[VALUE] for any JSON value. They're exported so that
  programs can use them directly.
 
+JSON allows whitespace around every value and punctuation mark.
+ @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and @racket[PAIR] skip
+ that whitespace, inside themselves and around themselves.
+ @racket[NUMBER] and @racket[STRING] match only their own text.
+ Whitespace is any of @racket[#\space], @racket[#\tab],
+ @racket[#\newline], and @racket[#\return].
+
 @defthing[VALUE #,Parser]{
  matches any JSON value along with the whitespace around it. It
  produces @racket[(quote null)], @racket[#t], or @racket[#f] for
@@ -98,13 +105,12 @@ The grammar behind @racket[string->json] is made of the parsers below:
  by one or more digits. The exponent is an @tt{e} or @tt{E}, an optional
  @tt{+} or @tt{-}, and one or more digits.
 
- It produces the number as an exact number: the digits, scaled by the
- power of 10 the exponent and fraction give. Building an exact number
- takes time and memory in proportion to that power, so beyond 10000
- either way, @racket[NUMBER] produces the nearest float instead, as
- @racket[string->jsexpr] does for every number with a fraction or
- exponent. RFC 8259 allows a parser to limit the numbers it reads
- exactly.
+ It produces the number as an exact number, which is its digits scaled
+ by a power of 10: the exponent, less the number of digits in the
+ fraction. Building an exact number takes time and memory in proportion
+ to that power, so beyond 10@superscript{±10000}, @racket[NUMBER]
+ produces the nearest float instead. RFC 8259 allows a parser to limit
+ the numbers it reads exactly.
 
 @examples[#:eval json-eval
 (parse NUMBER "7")
@@ -122,11 +128,11 @@ The grammar behind @racket[string->json] is made of the parsers below:
  and @tt{\u} followed by four hexadecimal digits, in either case.
 
  It produces the text between the quotes as a string, with each escape
- sequence replaced by the character it stands for. A @tt{\u} escape
- names a UTF-16 code unit, so a character outside the Basic Multilingual
- Plane is written as a surrogate pair, two @tt{\u} escapes in a row,
- which together produce one character. A surrogate without its other
- half produces the replacement character U+FFFD.
+ sequence decoded. A @tt{\u} escape names a UTF-16 code unit, so a
+ character outside the Basic Multilingual Plane is written as a
+ surrogate pair, two @tt{\u} escapes in a row, which together produce
+ one character. A surrogate without its other half produces the
+ replacement character U+FFFD.
 
 @examples[#:eval json-eval
 (code:comment "\"hi\"")
@@ -162,7 +168,7 @@ The grammar behind @racket[string->json] is made of the parsers below:
 
 @defthing[PAIR #,Parser]{
  matches one name and value in a JSON object, such as
- @tt{"name": true}, along with the whitespace around it, and produces a
+ @tt{"name": true}, along with the whitespace around it. It produces a
  pair of the name, as a symbol, and the value, as produced by
  @racket[VALUE].
 
@@ -170,11 +176,3 @@ The grammar behind @racket[string->json] is made of the parsers below:
 (code:comment "\"a\": true")
 (parse PAIR "\"a\": true")
 ]}
-
-As in JSON's own grammar, whitespace belongs to the values:
- @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and @racket[PAIR] each
- skip the whitespace around themselves, and the punctuation between them
- skips none, so the whitespace between two tokens is looked at once.
- They don't copy the whitespace they skip. Whitespace is any of
- @racket[#\space], @racket[#\tab], @racket[#\newline], and
- @racket[#\return].

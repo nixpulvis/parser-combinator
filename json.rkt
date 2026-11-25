@@ -114,12 +114,12 @@
         (lit "\"")))
 
 ; Parser
-; Matches an escape sequence, producing the character it stands for as a
+; Matches an escape sequence, producing the decoded character as a
 ; String. The backslash is matched once, and `alt` runs only the escape
 ; that the letter after it begins, rather than trying each in turn.
 (define-parser ESCAPE
   ; String String -> Parser
-  ; Matches the letter of an escape, producing the character it stands for.
+  ; Matches the letter of an escape, producing the decoded character.
   (let ([escaped (lambda (letter char) (pmap (const char) (lit letter)))])
     (preceded (lit "\\")
               (alt (escaped "\"" "\"")
