@@ -39,6 +39,7 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  @item{@racket[emp] produces the @Value it's given, or @racket['()]}
  @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
  text, a string}
+ @item{@racket[skip] produces @racket['()]}
  @item{@racket[pmap] produces whatever its function returns, given its
  parsers' @|Value|s}
  @item{@racket[seq] produces the list of its parsers' @|Value|s}
@@ -155,15 +156,17 @@ The parsers made by this library pass positions in the input to one
 ((rx #rx"a|b") "xb")
 ]}
 
-@defproc[(span [ok? (-> char? any/c)]) #,Parser]{
+@defproc[(span [ok? (or/c (-> char? any/c) string?)]) #,Parser]{
  produces a @Parser that matches the longest run of one or more
- characters at the start of its input that @racket[ok?] accepts. It
- fails if the first character isn't accepted, or if there is no input
- left. The @Value is the matched text.
+ characters at the start of its input that @racket[ok?] accepts, or,
+ when @racket[ok?] is a string, that are in it. It fails if the first
+ character isn't accepted, or if there is no input left. The @Value is
+ the matched text.
 
 @examples[#:eval parse-eval
 ((span char-alphabetic?) "abc123")
 ((span char-numeric?) "abc")
+((span "01") "0110 2")
 ]
 
  A @racket[span] matches the same text as an @racket[rx] for a character
@@ -173,6 +176,21 @@ The parsers made by this library pass positions in the input to one
  checks characters. Because it always takes the longest run, it can't
  match a fixed number of characters, which takes an @racket[rx] such as
  @racket[(rx #px"[0-9]{4}")].}
+
+@defproc[(skip [ok? (or/c (-> char? any/c) string?)]) #,Parser]{
+ produces a @Parser that matches the longest run of zero or more
+ characters that @racket[ok?] accepts, or, when @racket[ok?] is a
+ string, that are in it. It always succeeds, and its @Value is
+ @racket['()], so it doesn't copy the text it skips. It is for text a
+ grammar passes over, such as whitespace.
+
+ It matches what @racket[(pmap (const '()) (opt (span ok?)))] does,
+ without making the string that @racket[span] would.
+
+@examples[#:eval parse-eval
+((skip " \t") "  \tx")
+((skip " \t") "x")
+]}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "combinator"]{Combinators}
