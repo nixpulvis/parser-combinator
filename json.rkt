@@ -8,8 +8,7 @@
          STRING
          ARRAY
          OBJECT
-         PAIR
-         SPACE)
+         PAIR)
 
 ; ----------------------
 ; ----- JSON Values -----
@@ -39,34 +38,70 @@
 ; -------------------------------------
 
 ; Parser
-; The first character of a value says what kind it is, so `switch`
-; runs only that kind's parser, rather than each being tried in turn.
+; Matches a value with any whitespace around it. As in JSON's grammar,
+; the whitespace between tokens belongs to the values, so it's looked
+; for once: a value skips the whitespace on both sides, and the
+; punctuation around it skips none. Each kind of value begins with its
+; own characters, so `alt` runs only the parser for the kind the first
+; character says, rather than trying each in turn.
 (define-parser VALUE
-  (spacey (switch [(#\n) (pmap (const 'null) (lit "null"))]
-                  [(#\t) (pmap (const true) (lit "true"))]
-                  [(#\f) (pmap (const false) (lit "false"))]
-                  [(#\- #\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9) NUMBER]
-                  [(#\") STRING]
-                  [(#\[) ARRAY]
-                  [(#\{) OBJECT])))
+  (unwrap SKIP-SPACE
+          (alt (pmap (const 'null) (lit "null"))
+               (pmap (const true) (lit "true"))
+               (pmap (const false) (lit "false"))
+               NUMBER
+               STRING
+               ARRAY
+               OBJECT)
+          SKIP-SPACE))
 
 ; Parser
+; The value is the exact number the text names: the integer and fraction
+; digits as one integer, scaled by a power of 10. Building it takes time
+; and memory in proportion to the scale, so a short text like
+; 1e1000000000 could run out of memory. Beyond `exact-scale`, the value
+; is the nearest float instead, as `string->jsexpr` would give, which
+; RFC 8259 section 6 allows.
 (define-parser NUMBER
-  (pmap (lambda parts
-          (string->number (apply string-append "#e" (flatten parts))))
-        (opt (lit "-"))
+  (pmap (lambda (sign int frac exponent)
+          (let ([digits (string-append int frac)]
+                [scale (- exponent (string-length frac))])
+            (if (<= (abs scale) exact-scale)
+                (let ([n (* (digits->natural digits) (expt 10 scale))])
+                  (if (equal? sign "-") (- n) n))
+                (string->number (string-append sign digits "e" (number->string scale))
+                                10 'number-or-false 'decimal-as-inexact))))
+        (opt (lit "-") "")
         (alt (lit "0") DIGITS)
-        (opt (seq (lit ".") DIGITS))
-        (opt (seq (alt (lit "e") (lit "E"))
-                  (opt (alt (lit "+") (lit "-")))
-                  DIGITS))))
+        (opt (preceded (lit ".") DIGITS) "")
+        (opt (pmap (lambda (e sign digits)
+                     (if (equal? sign "-")
+                         (- (digits->natural digits))
+                         (digits->natural digits)))
+                   (alt (lit "e") (lit "E"))
+                   (opt (alt (lit "+") (lit "-")) "+")
+                   DIGITS)
+             0)))
 
-; Char -> Boolean
-(define (digit? c) (char<=? #\0 c #\9))
+; Natural
+; The largest power of 10, up or down, that NUMBER scales an exact number
+; by. Past it, NUMBER produces a float.
+(define exact-scale 10000)
+
+; String -> Natural
+; The value of a string of decimal digits. Adding up one digit at a time
+; is fastest for the short numbers JSON usually holds, but it multiplies
+; a growing number for every digit, so past 64 digits `string->number`
+; is faster.
+(define (digits->natural str)
+  (if (<= (string-length str) 64)
+      (for/fold ([n 0]) ([c (in-string str)])
+        (+ (* n 10) (- (char->integer c) (char->integer #\0))))
+      (string->number str)))
 
 ; Parser
 ; Matches a run of digits.
-(define DIGITS (span digit?))
+(define DIGITS (span "0123456789"))
 
 ; Parser
 ; Plain text is matched a run at a time with `span`, rather than a
@@ -75,59 +110,60 @@
 (define-parser STRING
   (pmap (lambda (open pieces close) (apply string-append pieces))
         (lit "\"")
-        (star (switch [(#\\) ESCAPE]
-                      [else (span string-char?)]))
+        (star (alt ESCAPE (span string-char?)))
         (lit "\"")))
 
 ; Parser
 ; Matches an escape sequence, producing the character it stands for as a
-; String. The backslash is matched once, and the letter after it chooses
-; the rest with `switch`, rather than each escape being tried in turn.
+; String. The backslash is matched once, and `alt` runs only the escape
+; that the letter after it begins, rather than trying each in turn.
 (define-parser ESCAPE
   ; String String -> Parser
   ; Matches the letter of an escape, producing the character it stands for.
   (let ([escaped (lambda (letter char) (pmap (const char) (lit letter)))])
     (preceded (lit "\\")
-              (switch [(#\") (escaped "\"" "\"")]
-                      [(#\\) (escaped "\\" "\\")]
-                      [(#\/) (escaped "/" "/")]
-                      [(#\b) (escaped "b" "\b")]
-                      [(#\f) (escaped "f" "\f")]
-                      [(#\n) (escaped "n" "\n")]
-                      [(#\r) (escaped "r" "\r")]
-                      [(#\t) (escaped "t" "\t")]
-                      [(#\u) UNICODE-ESCAPE]))))
+              (alt (escaped "\"" "\"")
+                   (escaped "\\" "\\")
+                   (escaped "/" "/")
+                   (escaped "b" "\b")
+                   (escaped "f" "\f")
+                   (escaped "n" "\n")
+                   (escaped "r" "\r")
+                   (escaped "t" "\t")
+                   UNICODE-ESCAPE))))
 
 ; Parser
 ; Matches the rest of a `\u` escape after its backslash, or of a UTF-16
 ; surrogate pair of them, producing the character it names as a String.
 ; A surrogate without its other half produces the replacement character
-; U+FFFD.
+; U+FFFD. The `u` is a `lit`, so `alt` can tell that a `\u` escape begins
+; with it.
 (define-parser UNICODE-ESCAPE
-  (alt (pmap (lambda (high low)
-               (string (integer->char
-                        (+ first-supplementary
-                           (arithmetic-shift (- high first-high-surrogate)
-                                             surrogate-bits)
-                           (- low first-low-surrogate)))))
-             (where CODE-UNIT high-surrogate?)
-             (preceded (lit "\\") (where CODE-UNIT low-surrogate?)))
-       (pmap (lambda (n)
-               (string (if (surrogate? n)
-                           replacement-character
-                           (integer->char n))))
-             CODE-UNIT)))
+  (preceded (lit "u")
+            (alt (pmap (lambda (high low)
+                         (string (integer->char
+                                  (+ first-supplementary
+                                     (arithmetic-shift (- high first-high-surrogate)
+                                                       surrogate-bits)
+                                     (- low first-low-surrogate)))))
+                       (where high-surrogate? CODE-UNIT)
+                       (preceded (lit "\\u") (where low-surrogate? CODE-UNIT)))
+                 (pmap (lambda (n)
+                         (string (if (surrogate? n)
+                                     replacement-character
+                                     (integer->char n))))
+                       CODE-UNIT))))
 
 ; Parser
-; Matches the `uXXXX` of a `\u` escape, after its backslash, producing
-; the UTF-16 code unit it names as a Natural.
+; Matches the four hexadecimal digits of a `\u` escape, producing the
+; UTF-16 code unit they name as a Natural. It has a Run of its own, since
+; `span` can't match a fixed number of characters.
 (define CODE-UNIT
   (parser
    (lambda (s i)
-     (let ([end (+ i 5)])
-       (if (and (<= end (string-length s))
-                (char=? (string-ref s i) #\u))
-           (let loop ([j (add1 i)] [n 0])
+     (let ([end (+ i 4)])
+       (if (<= end (string-length s))
+           (let loop ([j i] [n 0])
              (cond [(= j end) (matched n j)]
                    [(hex-digit (string-ref s j))
                     => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
@@ -170,42 +206,52 @@
   (not (or (char=? c #\") (char=? c #\\) (char<? c #\space))))
 
 ; Parser
+; Matches an array with any whitespace around it. Inside a value, the
+; value has already skipped the whitespace before it, so that skip finds
+; none.
 (define-parser ARRAY
-  (unwrap (spacey (lit "["))
-          (comma-separated VALUE)
-          (spacey (lit "]"))))
+  (pmap (lambda (space open vs close space2) vs)
+        SKIP-SPACE
+        (lit "[")
+        (comma-separated VALUE)
+        (lit "]")
+        SKIP-SPACE))
 
 ; Parser
+; Matches an object with any whitespace around it, as for `ARRAY`.
 (define-parser OBJECT
-  (pmap (lambda (open pairs close)
+  (pmap (lambda (space open pairs close space2)
           (for/hasheq ([pair (in-list pairs)])
             (values (car pair) (cdr pair))))
-        (spacey (lit "{"))
+        SKIP-SPACE
+        (lit "{")
         (comma-separated PAIR)
-        (spacey (lit "}"))))
+        (lit "}")
+        SKIP-SPACE))
 
 ; Parser
+; Matches a pair with any whitespace around it.
 (define-parser PAIR
-  (pmap (lambda (name colon value) (cons (string->symbol name) value))
+  (pmap (lambda (space name space2 colon value)
+          (cons (string->symbol name) value))
+        SKIP-SPACE
         STRING
-        (spacey (lit ":"))
+        SKIP-SPACE
+        (lit ":")
         VALUE))
 
+; TODO: Write comma-separated with sep-by* or sep-by+, once the open
+; whitespace changes to it have landed.
+
 ; Parser -> Parser
-; Matches zero or more `p`s separated by commas, producing the list of
-; their values.
+; Matches one or more `p`s separated by commas, producing the list of
+; their values, or only whitespace, producing '(). Each `p` skips the
+; whitespace around itself, so the commas don't.
 (define (comma-separated p)
-  (opt (pmap cons p (star (preceded (spacey (lit ",")) p)))))
+  (alt (pmap cons p (star (preceded (lit ",") p)))
+       (pmap (const '()) SKIP-SPACE)))
 
 ; Parser
-; Matches one or more whitespace characters.
-(define-parser SPACE
-  (span json-space?))
-
-; Char -> Boolean
-(define (json-space? c)
-  (or (char=? c #\space) (char=? c #\tab) (char=? c #\newline) (char=? c #\return)))
-
-; Parser -> Parser
-(define (spacey l)
-  (unwrap (opt SPACE) l (opt SPACE)))
+; Matches zero or more whitespace characters, producing '(). It moves
+; past the whitespace without copying it.
+(define SKIP-SPACE (skip " \t\n\r"))

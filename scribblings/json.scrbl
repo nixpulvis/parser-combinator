@@ -28,7 +28,8 @@ A @JSON is one of:
 @itemlist[
  @item{@racket['null], for @tt{null}}
  @item{a @racket[boolean?], for @tt{true} and @tt{false}}
- @item{an exact @racket[number?], for a JSON number}
+ @item{a @racket[number?], for a JSON number, exact unless it's scaled
+ by a power of 10 beyond 10000 either way}
  @item{a @racket[string?], for a JSON string}
  @item{a @racket[(listof #,JSON)], for a JSON array, an ordered
  collection of values}
@@ -73,13 +74,11 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-grammar"]{Grammar}
 
-The grammar behind @racket[string->json] is made of the parsers below.
- @racket[SPACE] matches whitespace, and its @Value is the matched text.
- The rest produce the @JSON itself, using @racket[pmap]:
- @racket[NUMBER], @racket[STRING], @racket[ARRAY], and
- @racket[OBJECT] for those kinds of value, @racket[PAIR] for one name and
- value in an object, and @racket[VALUE] for any JSON value. These parsers
- are exported so that programs can use them directly.
+The grammar behind @racket[string->json] is made of the parsers below:
+ @racket[NUMBER], @racket[STRING], @racket[ARRAY], and @racket[OBJECT]
+ for those kinds of value, @racket[PAIR] for one name and value in an
+ object, and @racket[VALUE] for any JSON value. They're exported so that
+ programs can use them directly.
 
 @defthing[VALUE #,Parser]{
  matches any JSON value along with the whitespace around it. It
@@ -99,11 +98,19 @@ The grammar behind @racket[string->json] is made of the parsers below.
  by one or more digits. The exponent is an @tt{e} or @tt{E}, an optional
  @tt{+} or @tt{-}, and one or more digits.
 
- It produces the number as an exact number.
+ It produces the number as an exact number: the digits, scaled by the
+ power of 10 the exponent and fraction give. Building an exact number
+ takes time and memory in proportion to that power, so beyond 10000
+ either way, @racket[NUMBER] produces the nearest float instead, as
+ @racket[string->jsexpr] does for every number with a fraction or
+ exponent. RFC 8259 allows a parser to limit the numbers it reads
+ exactly.
 
 @examples[#:eval json-eval
 (parse NUMBER "7")
 (parse NUMBER "-1.5e2")
+(parse NUMBER "1e10001")
+(parse NUMBER "-2e-99999")
 (eval:error (parse NUMBER "1."))
 ]}
 
@@ -134,8 +141,8 @@ The grammar behind @racket[string->json] is made of the parsers below.
 
 @defthing[ARRAY #,Parser]{
  matches a JSON array, that is, zero or more @racket[VALUE]s separated by
- commas and surrounded by brackets. It produces the list of values, in
- order.
+ commas and surrounded by brackets, along with the whitespace around it.
+ It produces the list of values, in order.
 
 @examples[#:eval json-eval
 (parse ARRAY "[true, false]")
@@ -143,8 +150,9 @@ The grammar behind @racket[string->json] is made of the parsers below.
 
 @defthing[OBJECT #,Parser]{
  matches a JSON object, that is, zero or more @racket[PAIR]s separated by
- commas and surrounded by braces. It produces an immutable
- @racket[hasheq] from the name of each @racket[PAIR] to its value.
+ commas and surrounded by braces, along with the whitespace around it. It
+ produces an immutable @racket[hasheq] from the name of each
+ @racket[PAIR] to its value.
 
 @examples[#:eval json-eval
 (parse OBJECT "{}")
@@ -154,23 +162,19 @@ The grammar behind @racket[string->json] is made of the parsers below.
 
 @defthing[PAIR #,Parser]{
  matches one name and value in a JSON object, such as
- @tt{"name": true}, and produces a pair of the name, as a symbol, and the
- value, as produced by @racket[VALUE].
+ @tt{"name": true}, along with the whitespace around it, and produces a
+ pair of the name, as a symbol, and the value, as produced by
+ @racket[VALUE].
 
 @examples[#:eval json-eval
 (code:comment "\"a\": true")
 (parse PAIR "\"a\": true")
 ]}
 
-Wherever the grammar allows whitespace around a value or a punctuation
- mark, the parsers skip an optional @racket[SPACE] with @racket[unwrap].
-
-@defthing[SPACE #,Parser]{
- matches one or more whitespace characters: @racket[#\space],
- @racket[#\tab], @racket[#\newline], and @racket[#\return]. The @Value
- is the matched text.
-
-@examples[#:eval json-eval
-((opt SPACE) " \t\nx")
-((opt SPACE) "x")
-]}
+As in JSON's own grammar, whitespace belongs to the values:
+ @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and @racket[PAIR] each
+ skip the whitespace around themselves, and the punctuation between them
+ skips none, so the whitespace between two tokens is looked at once.
+ They don't copy the whitespace they skip. Whitespace is any of
+ @racket[#\space], @racket[#\tab], @racket[#\newline], and
+ @racket[#\return].
