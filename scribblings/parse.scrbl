@@ -104,7 +104,8 @@ The parsers made by this library pass positions in the input to one
  are defined later in the module. After that first application,
  @racket[id] keeps the parser that @racket[parser-expr] produced, so
  @racket[parser-expr] is evaluated only once, rather than every time the
- parser runs.
+ parser runs. The parser is named @racket[id], which is its
+ @racket[object-name], so it prints with that name.
 
 @examples[#:eval parse-eval
 (code:comment "Parser")
@@ -115,6 +116,7 @@ The parsers made by this library pass positions in the input to one
 
 (parse PARENS "(()())")
 (eval:error (parse PARENS "(()"))
+PARENS
 ]}
 
 @; -----------------------------------------------------------------------------
@@ -482,13 +484,21 @@ A @Run matches its string starting at the given position, and produces
  represents a successful match, as produced by a @Run that matches. See
  @|Match|.}
 
-@defform[(parser run-expr)
-         #:contracts ([run-expr #,Run])]{
+@defform*[((parser run-expr)
+           (parser run-expr name-expr))
+          #:contracts ([run-expr #,Run]
+                       [name-expr (or/c symbol? #f)])]{
  makes a @Parser from a @|Run|. Applying it to a string calls its
  @Run from position @racket[0], and turns the @Match into a @|Result|,
  copying the rest of the input once, for its @racket[_remaining]. The
  combinators in @racketmodname[parser-combinator/parse] call its @Run
  directly, with positions, so used inside a grammar it never copies.
+
+ The parser's @racket[object-name] is the value of @racket[name-expr],
+ or @racket[#f] without one, so a named parser prints with its name,
+ such as @racketresultfont{#<procedure:NAME>}. @racket[define-parser]
+ names its parser after its @racket[id], and the parsers made by the
+ combinators have no name.
 
  @racket[parser] is syntax, not a procedure, so it can't be passed to
  @racket[apply] or used as a value. Making the parser where its @Run is

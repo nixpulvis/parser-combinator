@@ -83,10 +83,12 @@
   ; isn't copied while parsing. Applying a `parser` to a String runs it
   ; from position 0, and copies the rest of the input once, for the
   ; Result's `remaining`.
-  ; A parser also has its Start, below.
-  (struct parser (run [start #:mutable])
+  ; A parser also has its Start, below, and an optional name, a Symbol or
+  ; #f, which is its `object-name`, so it prints as #<procedure:name>.
+  (struct parser (run [start #:mutable] name)
     #:name parser-struct
     #:constructor-name make-parser
+    #:property prop:object-name 2
     #:property prop:procedure
     (lambda (self s)
       (let ([m ((parser-run self) s 0)])
@@ -96,14 +98,17 @@
 
   ; Run -> Parser
   ; Run Start -> Parser
+  ; Run Start Name -> Parser
   ; Makes a parser with the Start #f, or the given one, which can be a
-  ; thunk. It's a macro so the struct is made where the Run is written,
-  ; which Racket's compiler can see through. Made through a function
-  ; instead, citm_catalog.json parses about 30% slower.
+  ; thunk, and the name #f, or the given one. It's a macro so the struct
+  ; is made where the Run is written, which Racket's compiler can see
+  ; through. Made through a function instead, citm_catalog.json parses
+  ; about 30% slower.
   (define-syntax (parser stx)
     (syntax-case stx ()
-      [(_ run) #'(make-parser run #f)]
-      [(_ run st) #'(make-parser run st)]))
+      [(_ run) #'(make-parser run #f #f)]
+      [(_ run st) #'(make-parser run st #f)]
+      [(_ run st name) #'(make-parser run st name)]))
 
   ; Parser String Natural -> Match
   ; Runs any Parser from position `i` of `s`. A Parser that is a plain
@@ -197,10 +202,14 @@
   (require (rename-in (submod ".." private) [parser parser-with-start]))
 
   ; Run -> Parser
-  ; Makes a parser from a Run written by hand. `alt` always tries it,
-  ; since it can't tell what such a parser begins with.
-  (define-syntax-rule (parser run)
-    (parser-with-start run)))
+  ; Run Name -> Parser
+  ; Makes a parser from a Run written by hand, with the name #f, or the
+  ; given one. `alt` always tries it, since it can't tell what such a
+  ; parser begins with.
+  (define-syntax parser
+    (syntax-rules ()
+      [(_ run) (parser-with-start run)]
+      [(_ run name) (parser-with-start run #f name)])))
 
 (require 'private)
 
@@ -230,6 +239,7 @@
 
 ; (define-parser name body)
 ; Defines `name` as the parser `body`, built the first time it's needed.
+; The parser is named `name`.
 (define-syntax-rule (define-parser name body)
   (define name
     (let ([p #f]
@@ -237,7 +247,8 @@
       (parser (lambda (s i)
                 (run (once p (build)) s i))
               (lambda ()
-                (start-of (once p (build))))))))
+                (start-of (once p (build))))
+              'name))))
 
 ; The combinators from `emp` to `where` are the kernel. Each has its own
 ; Run, and the speed is all in these. The ones after `where` are made

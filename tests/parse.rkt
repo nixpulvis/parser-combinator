@@ -4,6 +4,10 @@
 ; The library's private module has everything the positions module does,
 ; and the Starts, which the tests check.
 (require (submod "../parse.rkt" private))
+; The positions module's `parser` takes a name where the private one's
+; takes a Start.
+(require (prefix-in positions: (only-in (submod "../parse.rkt" positions)
+                                        parser)))
 
 ; String ... -> [Exn -> Boolean]
 ; Whether an exception's message is the `parts` joined together.
@@ -18,6 +22,8 @@
 (check-equal? builds 0)
 (check-equal? (list (COUNTED "xy") (COUNTED "x") (COUNTED "y") builds)
               (list (result "x" "y") (result "x" "") 'error 1))
+(check-equal? (object-name COUNTED) 'COUNTED)
+(check-equal? (format "~a" COUNTED) "#<procedure:COUNTED>")
 
 ; lit tests
 (check-equal? ((lit "-") "-1.35")
@@ -427,6 +433,9 @@
 (check-equal? (begin ((seq (lit "ab") spy) spied)
                      (and (eq? (car seen) spied) (cdr seen)))
               2)
+(check-equal? (object-name (positions:parser (lambda (s i) 'error) 'NAMED))
+              'NAMED)
+(check-equal? (object-name (positions:parser (lambda (s i) 'error))) #f)
 
 ; parse tests
 (check-equal? (parse (emp) "") '())
