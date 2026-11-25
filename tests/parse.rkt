@@ -459,6 +459,18 @@
 (check-equal? (object-name (positions:parser (lambda (s i) 'error) 'NAMED))
               'NAMED)
 (check-equal? (object-name (positions:parser (lambda (s i) 'error))) #f)
+; A plain-function parser can't give back more text than it was given.
+(define (GROW s)
+  (result 'g (string-append "zz" s)))
+(check-exn (message-is "run: parser's remaining is longer than its input\n"
+                       "  parser: #<procedure:GROW>\n"
+                       "  input: \"bc\"\n"
+                       "  remaining: \"zzbc\"")
+           (λ () ((unwrap (lit "a") GROW (lit "c")) "abc")))
+(define (BACK-ONE s)
+  (result 'b (string-append "x" s)))
+(check-exn exn:fail:contract?
+           (λ () ((unwrap (lit "a") BACK-ONE (lit "a")) "ab")))
 
 ; parse tests
 (check-equal? (parse (emp) "") '())
