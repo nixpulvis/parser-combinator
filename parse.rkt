@@ -11,8 +11,6 @@
          seq
          pmap
          alt
-         alt*
-         switch
          opt
          star
          plus
@@ -32,8 +30,7 @@
 ; - `pmap` produces whatever its function returns, given its parsers'
 ;   Values
 ; - `seq` produces the list of its parsers' Values
-; - `alt` and `alt*` produce the Value of the parser that matched
-; - `switch` produces the Value of the parser it chose
+; - `alt` produces the Value of the parser that matched
 ; - `opt` produces its parser's Value, or its default if its parser
 ;   fails, '() unless it's given one
 ; - `star` and `plus` produce the list of their parser's Values
@@ -42,16 +39,25 @@
 ; - `preceded` and `terminated` produce the Value of the parser they
 ;   don't skip
 
-; Parsers that match from a position in their input, rather than from
-; the start of a copy of what's left of it. The combinators below are
-; made this way. A parser written with these works with them without
-; copying the input. Require them with
-; (require (submod parser-combinator/parse positions)).
-(module positions racket/base
+; What the library itself knows about a parser: its Run, which the
+; `positions` module below shares with grammars, and its Start, which
+; stays in here. A grammar never writes a Start. Each combinator works
+; its own out from its parts, so `alt` can skip the alternatives that
+; can't match the next character.
+(module private racket/base
   (provide (struct-out result)
            (struct-out matched)
-           (struct-out parser)
-           run)
+           parser
+           parser?
+           parser-run
+           run
+           (struct-out start)
+           start-of
+           start-then
+           start-or
+           may-be-empty)
+
+  (require (for-syntax racket/base))
 
   ; A Result is one of:
   ; - 'error
@@ -73,13 +79,27 @@
   ; isn't copied while parsing. Applying a `parser` to a String runs it
   ; from position 0, and copies the rest of the input once, for the
   ; Result's `remaining`.
-  (struct parser (run)
+  ; A parser also has its Start, below.
+  (struct parser (run [start #:mutable])
+    #:name parser-struct
+    #:constructor-name make-parser
     #:property prop:procedure
     (lambda (self s)
       (let ([m ((parser-run self) s 0)])
         (if (symbol? m)
             'error
             (result (matched-value m) (substring s (matched-end m)))))))
+
+  ; Run -> Parser
+  ; Run Start -> Parser
+  ; Makes a parser with the Start #f, or the given one, which can be a
+  ; thunk. It's a macro so the struct is made where the Run is written,
+  ; which Racket's compiler can see through. Made through a function
+  ; instead, citm_catalog.json parses about 30% slower.
+  (define-syntax (parser stx)
+    (syntax-case stx ()
+      [(_ run) #'(make-parser run #f)]
+      [(_ run st) #'(make-parser run st)]))
 
   ; Parser String Natural -> Match
   ; Runs any Parser from position `i` of `s`. A Parser that is a plain
@@ -92,9 +112,93 @@
               'error
               (matched (result-value r)
                        (- (string-length s)
-                          (string-length (result-remaining r)))))))))
+                          (string-length (result-remaining r))))))))
 
-(require 'positions)
+  ; A Start says which characters a parser's matches can begin with. It
+  ; is one of:
+  ; - #f, when it could be any character, or it isn't known
+  ; - (start [Listof Char] Boolean), when it can only be one of the
+  ;   Chars, and, if the Boolean is true, the parser can also match
+  ;   without consuming anything
+  ; So (start '() #t) is the Start of a parser that only matches nothing,
+  ; like `emp`, and (start '() #f) of one that never matches.
+  (struct start (chars empty?))
+
+  ; Any -> Start
+  ; The Start of `p`. A plain function's Start is #f, and so is that of a
+  ; parser with a Run written by hand. A grammar refers to parsers that
+  ; aren't defined yet, so a combinator gives its Start as a thunk, which
+  ; is called the first time the Start is needed and replaced by what it
+  ; returns. While a Start is being worked out it's #f, so a grammar that
+  ; refers to itself doesn't loop, and a Start worked out from it in the
+  ; meantime keeps #f. That only turns `alt`'s dispatch off for that
+  ; parser, so the tests check the JSON grammar's Starts.
+  ; NOTE: Mutation gains 1.15x speed in the escapes bench, over keeping a
+  ; thunk's Start in a promise made when the parser is.
+  (define (start-of p)
+    (if (parser? p)
+        (let ([st (parser-start p)])
+          (if (procedure? st)
+              (begin
+                (set-parser-start! p #f)
+                (let ([st (st)])
+                  (set-parser-start! p st)
+                  st))
+              st))
+        #f))
+
+  ; The Starts of the combinators are made from their parsers' with
+  ; these three.
+
+  ; Start [-> Start] -> Start
+  ; The Start of a parser with the Start `a`, followed by one whose Start
+  ; `rest` returns. It begins like the first, and, if the first can match
+  ; without consuming anything, like the second too. `rest` is only
+  ; called in that case, so a sequence doesn't ask for the Starts of the
+  ; parsers after the first one that must consume something.
+  (define (start-then a rest)
+    (cond [(not a) #f]
+          [(start-empty? a)
+           (let ([b (rest)])
+             (and b (start (append (start-chars a) (start-chars b))
+                           (start-empty? b))))]
+          [else a]))
+
+  ; Start Start -> Start
+  ; The Start of a choice between a parser with the Start `a` and one
+  ; with the Start `b`, which begins like either.
+  (define (start-or a b)
+    (and a b (start (append (start-chars a) (start-chars b))
+                    (or (start-empty? a) (start-empty? b)))))
+
+  ; Start -> Start
+  ; The Start of a parser that begins like one with the Start `a`, or
+  ; else matches without consuming anything.
+  (define (may-be-empty a)
+    (and a (start (start-chars a) #t))))
+
+; Parsers that match from a position in their input, rather than from
+; the start of a copy of what's left of it. The combinators below are
+; made this way. A parser written with these works with them without
+; copying the input. Require them with
+; (require (submod parser-combinator/parse positions)).
+(module positions racket/base
+  (provide (struct-out result)
+           (struct-out matched)
+           parser
+           parser?
+           parser-run
+           run)
+
+  (require (rename-in (submod ".." private) [parser parser-with-start]))
+
+  ; Run -> Parser
+  ; Makes a parser from a Run written by hand. `alt` always tries it,
+  ; since it can't tell what such a parser begins with.
+  (define-syntax-rule (parser run)
+    (parser-with-start run)))
+
+(require 'private)
 
 ; Parser String -> Value
 (define (parse p str)
@@ -107,15 +211,29 @@
           [else
            (matched-value m)])))
 
+; (once x expr)
+; The value of the variable `x`, which is #f until this first sets it to
+; the value of `expr`. A grammar refers to parsers that aren't defined
+; yet, and to itself, so some work has to wait until the whole grammar
+; exists: `define-parser` builds its body, and `alt` its table of which
+; alternatives to try for each character. Both do it with this, the
+; first time they run, and keep the result.
+; NOTE: Setting a variable gains 1.05x to 1.1x speed in the canada.json
+; bench, and 1.3x to 1.35x in the escapes bench, over forcing a promise
+; on every run.
+(define-syntax-rule (once x expr)
+  (or x (begin (set! x expr) x)))
+
 ; (define-parser name body)
-; Defines `name` as the parser `body`, built the first time it runs
-; rather than every time, so a grammar isn't rebuilt as it parses.
+; Defines `name` as the parser `body`, built the first time it's needed.
 (define-syntax-rule (define-parser name body)
   (define name
-    (let ([p #f])
+    (let ([p #f]
+          [build (lambda () body)])
       (parser (lambda (s i)
-                (unless p (set! p body))
-                (run p s i))))))
+                (run (once p (build)) s i))
+              (lambda ()
+                (start-of (once p (build))))))))
 
 ; The combinators from `emp` to `where` are the kernel. Each has its own
 ; Run, and the speed is all in these. The ones after `where` are made
@@ -127,7 +245,8 @@
 (define (emp [v '()])
   (parser
    (lambda (s i)
-     (matched v i))))
+     (matched v i))
+   (start '() #t)))
 
 ; String -> Parser
 (define (lit str)
@@ -140,7 +259,10 @@
                       (and (char=? (string-ref str k) (string-ref s (+ i k)))
                            (loop (add1 k))))))
            (matched str (+ i len))
-           'error)))))
+           'error))
+     (if (= len 0)
+         (start '() #t)
+         (start (list (string-ref str 0)) #f)))))
 
 ; Regexp -> Parser
 ; Matches `pattern` at the start of the input.
@@ -165,7 +287,8 @@
    (scan ok? (s i j)
      (if (= j i)
          'error
-         (matched (substring s i j) j)))))
+         (matched (substring s i j) j)))
+   (and (string? ok?) (start (string->list ok?) #f))))
 
 ; (or/c [Char -> Any] String) -> Parser
 ; Like `span`, but matches zero or more characters, and produces '()
@@ -173,7 +296,8 @@
 (define (skip ok?)
   (parser
    (scan ok? (s i j)
-     (matched '() j))))
+     (matched '() j))
+   (and (string? ok?) (start (string->list ok?) #t))))
 
 ; (scan ok? (s i j) body) : Run
 ; Makes a Run that finds where the run of characters that `ok?` accepts,
@@ -218,7 +342,18 @@
   (let* ([ps (cons p ps)] [n (length ps)])
     (unless (and (procedure? f) (procedure-arity-includes? f n))
       (raise-argument-error 'pmap (format "(procedure-arity-includes/c ~a)" n) f))
-    (parser (all-of f ps))))
+    (parser (all-of f ps)
+            (lambda () (seq-start ps)))))
+
+; [Listof Parser] -> Start
+; A sequence can begin with what its first parser can, and, if that one
+; can match without consuming anything, with what the next one can, and
+; so on.
+(define (seq-start ps)
+  (if (null? ps)
+      (start '() #t)
+      (start-then (start-of (car ps))
+                  (lambda () (seq-start (cdr ps))))))
 
 ; Natural
 ; The most parsers `all-of` writes a Run out for, with `steps`. Longer
@@ -308,40 +443,66 @@
            (let ([x (matched-value m)] [j (matched-end m)])
              (steps s j build (v ... x) (rest ...)))))]))
 
-; Parser Parser -> Parser
-(define (alt p1 p2)
-  (parser
-   (lambda (s i)
-     (let ([m1 (run p1 s i)])
-       (if (symbol? m1) (run p2 s i) m1)))))
+; Parser ... -> Parser
+; Tries each parser in order, from the same position, and matches what
+; the first one to match does. It skips the parsers whose Start says
+; they can't match the next character, so when each alternative begins
+; with its own characters, it runs only one of them.
+(define (alt . ps)
+  (let ([choose #f])
+    (parser
+     (lambda (s i)
+       (((once choose (chooser ps)) s i) s i))
+     (lambda () (alt-start ps)))))
 
-; (switch [(Char ...) Parser] ...) : Parser
-; (switch [(Char ...) Parser] ... [else Parser]) : Parser
-; Looks at the next character without consuming it, and runs only the
-; parser of the clause that lists it, or the `else` parser if no clause
-; does or there is no character left. If the chosen parser fails, so
-; does `switch`, without trying any other clause. That is like `alt`
-; for alternatives that can only start with the characters listed for
-; them, and costs one `case` instead of trying each alternative in turn.
-; Like the other combinators, it evaluates its parser expressions once,
-; when it is made, rather than every time it runs.
-(define-syntax (switch stx)
-  (syntax-case stx (else)
-    [(_ [(c ...) p] ... [else q])
-     (with-syntax ([(t ...) (generate-temporaries #'(p ...))])
-       #'(let ([t p] ... [otherwise q])
-           (parser
-            (lambda (s i)
-              (if (< i (string-length s))
-                  (case (string-ref s i)
-                    [(c ...) (run t s i)] ...
-                    [else (run otherwise s i)])
-                  (run otherwise s i))))))]
-    [(_ [(c ...) p] ...)
-     ; Without an `else`, a character no clause lists fails. Any other
-     ; shape, such as a misplaced `else`, matches neither rule and is a
-     ; syntax error, rather than being expanded again forever.
-     #'(switch [(c ...) p] ... [else (parser (lambda (s i) 'error))])]))
+; [Listof Parser] -> [String Natural -> Run]
+; Picks the Run that tries just the parsers in `ps` that could match from
+; position `i` of `s`, by the next character. A Run for each ASCII
+; character is kept in a vector, and for other characters in a hash.
+(define (chooser ps)
+  (let* ([sts (map start-of ps)]
+         [chars (remove-duplicates
+                 (append-map (lambda (st) (if st (start-chars st) '())) sts))]
+         ; [Maybe Char] -> Run
+         [for-char
+          (lambda (c)
+            (first-of (for/list ([p (in-list ps)] [st (in-list sts)]
+                                 #:when (or (not st)
+                                            (start-empty? st)
+                                            (and c (memv c (start-chars st)))))
+                        p)))]
+         [otherwise (for-char #f)]
+         [ascii (for/vector #:length 128 ([n (in-range 128)])
+                  (let ([c (integer->char n)])
+                    (if (memv c chars) (for-char c) otherwise)))]
+         [unicode (for/hasheqv ([c (in-list chars)]
+                                #:when (>= (char->integer c) 128))
+                    (values c (for-char c)))])
+    (lambda (s i)
+      (if (< i (string-length s))
+          (let ([n (char->integer (string-ref s i))])
+            (if (< n 128)
+                (vector-ref ascii n)
+                (hash-ref unicode (string-ref s i) (lambda () otherwise))))
+          otherwise))))
+
+; [Listof Parser] -> Run
+; Matches what the first of `ps` to match does.
+(define (first-of ps)
+  (cond [(null? ps) (lambda (s i) 'error)]
+        [(and (null? (cdr ps)) (parser? (car ps))) (parser-run (car ps))]
+        [else (lambda (s i)
+                (let loop ([ps ps])
+                  (if (null? ps)
+                      'error
+                      (let ([m (run (car ps) s i)])
+                        (if (symbol? m) (loop (cdr ps)) m)))))]))
+
+; [Listof Parser] -> Start
+; Alternatives can begin with what any of them can.
+(define (alt-start ps)
+  (for/fold ([st (start '() #f)]) ([p (in-list ps)])
+    (start-or st (start-of p))))
 
 ; Parser -> Parser
 ; Stops when `p` fails, or matches without consuming input, which would
@@ -351,7 +512,10 @@
   (letrec ([step (parser
                   (lambda (s i)
                     (let ([m (run p s i)])
-                      (if (and (matched? m) (> (matched-end m) i)) m 'error))))]
+                      (if (and (matched? m) (> (matched-end m) i)) m 'error)))
+                  (lambda ()
+                    (let ([st (start-of p)])
+                      (and st (start (start-chars st) #f)))))]
            [self (alt (pmap cons
                             step
                             (parser (lambda (s i) (run self s i))))
@@ -364,7 +528,8 @@
   (parser
    (lambda (s i)
      (let ([m (run p s i)])
-       (if (and (matched? m) (ok? (matched-value m))) m 'error)))))
+       (if (and (matched? m) (ok? (matched-value m))) m 'error)))
+   (lambda () (start-of p))))
 
 ; The combinators below are made from the kernel's.
 
@@ -373,12 +538,6 @@
 ; their Values.
 (define (seq p . ps)
   (apply pmap list p ps))
-
-; Parser Parser ... -> Parser
-(define (alt* p . ps)
-  (if (empty? ps)
-      p
-      (alt p (apply alt* ps))))
 
 ; Parser -> Parser
 ; Parser Value -> Parser
