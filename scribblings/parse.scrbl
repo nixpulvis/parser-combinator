@@ -36,24 +36,27 @@
 A @Value is whatever a @Parser produces when it matches. The parsers in
  this library produce plain Racket values:
 @itemlist[
- @item{@racket[emp] produces @racket['()]}
+ @item{@racket[emp] produces the @Value it's given, or @racket['()]}
  @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
  text, a string}
- @item{@racket[seq] and @racket[seq*] produce whatever their
- constructor returns, given their parsers' @|Value|s}
+ @item{@racket[pmap] produces whatever its function returns, given its
+ parsers' @|Value|s}
+ @item{@racket[seq] produces the list of its parsers' @|Value|s}
  @item{@racket[alt] and @racket[alt*] produce the @Value of the parser
  that matched}
  @item{@racket[switch] produces the @Value of the parser it chose}
- @item{@racket[opt] produces its parser's @Value, or @racket['()] if its
+ @item{@racket[opt] produces its parser's @Value, or its default if its
  parser fails}
  @item{@racket[star] and @racket[plus] produce the list of their
  parser's @|Value|s}
  @item{@racket[where] produces its parser's @|Value|, when its
  condition is met}
  @item{@racket[unwrap] produces the @Value of its middle parser}
+ @item{@racket[preceded] and @racket[terminated] produce the @Value of
+ the parser they don't skip}
 ]
-The constructors are where a grammar builds the data the program needs,
- such as a list, a number, or a structure of its own.
+The functions given to @racket[pmap] are where a grammar builds the data
+ the program needs, such as a number, or a structure of its own.
 
 @deftech{Result} : @racket[(or/c 'error result?)]
 
@@ -116,15 +119,16 @@ The parsers made by this library pass positions in the input to one
 @; -----------------------------------------------------------------------------
 @section[#:tag "primitive"]{Primitive Parsers}
 
-@defproc[(emp) #,Parser]{
+@defproc[(emp [v any/c '()]) #,Parser]{
  produces a @Parser that always succeeds without consuming any input.
- The @Value is @racket['()].
+ The @Value is @racket[v].
 
  Note that @racket[emp] is a function that produces a parser, not a
  parser itself, so it is used as @racket[(emp)].
 
 @examples[#:eval parse-eval
 ((emp) "abc")
+((emp 0) "abc")
 ]}
 
 @defproc[(lit [str string?]) #,Parser]{
@@ -173,44 +177,55 @@ The parsers made by this library pass positions in the input to one
 @; -----------------------------------------------------------------------------
 @section[#:tag "combinator"]{Combinators}
 
-@defproc[(seq [build (-> #,Value #,Value #,Value)]
-              [p1 #,Parser]
-              [p2 #,Parser])
-         #,Parser]{
- produces a @Parser that runs @racket[p1] and then runs @racket[p2] on
- the input that @racket[p1] left over. It fails if either parser does.
- The @Value is @racket[(build _left _right)], where @racket[_left] and
- @racket[_right] are the @|Value|s of @racket[p1] and @racket[p2].
- @racket[build] must accept two arguments. If it does not, @racket[seq]
- raises @racket[exn:fail:contract] when it makes the parser.
-
-@examples[#:eval parse-eval
-((seq list (lit "a") (lit "b")) "abc")
-((seq string-append (lit "a") (lit "b")) "abc")
-((seq list (lit "a") (lit "b")) "acb")
-]}
-
-@defproc[(seq* [build procedure?] [p #,Parser] ...+) #,Parser]{
+@defproc[(pmap [f procedure?] [p #,Parser] ...+) #,Parser]{
  produces a @Parser that runs each @racket[p] in order, each on the
  input that the previous one left over. It fails if any @racket[p] does.
- The @Value is the result of calling @racket[build] with the @|Value|s of
- the @racket[p]s, one argument per parser, in order.
+ The @Value is the result of calling @racket[f] with the @racket[p]s'
+ @|Value|s, one argument per parser, just as @racket[map] calls its
+ function with one element of each list. Unlike @racket[map]'s lists,
+ the @racket[p]s are matched one after another, not side by side.
 
- @racket[build] must accept as many arguments as there are
- @racket[p]s. If it does not, @racket[seq*] raises
- @racket[exn:fail:contract] when it makes the parser, before any input
- is parsed. A constructor can keep only some of the @|Value|s, which is
- useful for dropping delimiters. For the common case of keeping only the
- middle of three, see @racket[unwrap].
+ With one @racket[p], @racket[f] converts its @Value into one of the
+ program's own.
 
 @examples[#:eval parse-eval
-(parse (seq* list (lit "a") (lit "b") (lit "c"))
-       "abc")
-(parse (seq* (lambda (l x r) (string->symbol x))
+((pmap string->number (rx #px"\\d+")) "42!")
+((pmap length (star (lit "a"))) "aab")
+]
+
+ With more, @racket[f] combines their @|Value|s. It can keep only some of
+ them, which is useful for dropping delimiters. For the common case of
+ keeping only the middle of three, see @racket[unwrap].
+
+@examples[#:eval parse-eval
+((pmap string-append (lit "a") (lit "b")) "abc")
+((pmap string-append (lit "a") (lit "b")) "acb")
+(parse (pmap (lambda (l x r) (string->symbol x))
              (lit "(") (rx #rx"[a-z]+") (lit ")"))
        "(abc)")
+]
+
+ @racket[f] must accept one argument per @racket[p]. If it does not,
+ @racket[pmap] raises @racket[exn:fail:contract] when it makes the
+ parser, before any input is parsed.
+
+@examples[#:eval parse-eval
 (eval:error
- (seq* (lambda (a b) a) (lit "a") (lit "b") (lit "c")))
+ (pmap (lambda (a b) a) (lit "a") (lit "b") (lit "c")))
+]
+
+ For a short sequence, as most are, @racket[f] is called with the
+ @|Value|s directly, without collecting them in a list.
+}
+
+@defproc[(seq [p #,Parser] ...+) #,Parser]{
+ produces a @Parser that runs each @racket[p] in order, as
+ @racket[pmap] does. The @Value is the list of the @racket[p]s'
+ @|Value|s, in order. It is the same as @racket[(pmap list p ...)].
+
+@examples[#:eval parse-eval
+((seq (lit "a") (lit "b")) "abc")
+((seq (lit "a") (lit "b")) "acb")
 ]}
 
 @defproc[(alt [p1 #,Parser] [p2 #,Parser]) #,Parser]{
@@ -229,9 +244,9 @@ The parsers made by this library pass positions in the input to one
 
 @examples[#:eval parse-eval
 (eval:error
- (parse (seq list (alt (lit "a") (lit "ab")) (lit "c"))
+ (parse (seq (alt (lit "a") (lit "ab")) (lit "c"))
         "abc"))
-(parse (seq list (alt (lit "ab") (lit "a")) (lit "c"))
+(parse (seq (alt (lit "ab") (lit "a")) (lit "c"))
        "abc")
 ]}
 
@@ -279,14 +294,15 @@ The parsers made by this library pass positions in the input to one
 ((switch [(#\a) (lit "ab")] [else (lit "ac")]) "ac")
 ]}
 
-@defproc[(opt [p #,Parser]) #,Parser]{
+@defproc[(opt [p #,Parser] [default any/c '()]) #,Parser]{
  produces a @Parser that behaves like @racket[p] if @racket[p] matches,
  and otherwise succeeds without consuming input, producing
- @racket['()].
+ @racket[default]. It is the same as @racket[(alt p (emp default))].
 
 @examples[#:eval parse-eval
 ((opt (lit "-")) "-5")
 ((opt (lit "-")) "5")
+((opt (lit "-") "+") "5")
 ]}
 
 @defproc[(star [p #,Parser]) #,Parser]{
@@ -300,7 +316,7 @@ The parsers made by this library pass positions in the input to one
 ]
 
  Like @racket[alt], @racket[star] never gives back a match, so
- @racket[(seq list (star (lit "a")) (lit "a"))] matches nothing at
+ @racket[(seq (star (lit "a")) (lit "a"))] matches nothing at
  all. It stops at the first match of @racket[p] that consumes no input,
  leaving that match out, so a @racket[p] that can match the empty string,
  such as @racket[(opt _q)], can't make it repeat forever.
@@ -324,7 +340,7 @@ The parsers made by this library pass positions in the input to one
  @racket[p] had not matched. The @Value is @racket[p]'s.
 
 @examples[#:eval parse-eval
-(define NUMBER (seq* string->number (rx #px"\\d+")))
+(define NUMBER (pmap string->number (rx #px"\\d+")))
 (define BYTE (where NUMBER byte?))
 (parse BYTE "200")
 (eval:error (parse BYTE "300"))
@@ -347,7 +363,7 @@ The parsers made by this library pass positions in the input to one
 @defproc[(unwrap [left #,Parser] [body #,Parser] [right #,Parser]) #,Parser]{
  produces a @Parser that runs @racket[left], @racket[body], and
  @racket[right] in order, and produces the @Value of @racket[body]. It is
- the same as @racket[(seq* (lambda (l b r) b) left body right)], and is
+ the same as @racket[(pmap (lambda (l b r) b) left body right)], and is
  useful for skipping over text that the program does not care about,
  such as whitespace.
 
@@ -355,6 +371,29 @@ The parsers made by this library pass positions in the input to one
 (define SPACES (star (lit " ")))
 (parse (unwrap SPACES (lit "x") SPACES) "  x ")
 ]}
+
+@defproc[(preceded [skipped #,Parser] [p #,Parser]) #,Parser]{
+ produces a @Parser that runs @racket[skipped] and then @racket[p], and
+ produces the @Value of @racket[p]. It is the same as
+ @racket[(pmap (lambda (_ v) v) skipped p)], and is useful for dropping
+ punctuation in front of a value.
+
+@examples[#:eval parse-eval
+(parse (preceded (lit "$") (rx #px"\\d+")) "$42")
+]}
+
+@defproc[(terminated [p #,Parser] [skipped #,Parser]) #,Parser]{
+ produces a @Parser that runs @racket[p] and then @racket[skipped], and
+ produces the @Value of @racket[p]. It is the same as
+ @racket[(pmap (lambda (v _) v) p skipped)].
+
+@examples[#:eval parse-eval
+(parse (terminated (rx #px"\\d+") (lit "%")) "42%")
+]
+
+ The names and argument orders are those of @tt{preceded} and
+ @tt{terminated} in Rust's nom library, which calls @racket[unwrap]
+ @tt{delimited}.}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "run-parsers"]{Run Parsers}
