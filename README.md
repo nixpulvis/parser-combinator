@@ -95,10 +95,10 @@ raco pkg install --auto --skip-installed benchmark
 scripts/bench.rkt
 ```
 
-On `master` as of 2026-10-22, against Racket's parser.
+On `master` as of 2026-11-25, against Racket's parser.
 
 ```sh
-scripts/bench.rkt --racket --vs racket --plot assets/bench-racket-2026-10-22.svg
+scripts/bench.rkt --racket --vs racket --plot assets/bench-racket-2026-11-25.svg
 ```
 
-![string->json times relative to string->jsexpr](assets/bench-racket-2026-10-22.svg)
+![string->json times relative to string->jsexpr](assets/bench-racket-2026-11-25.svg)
