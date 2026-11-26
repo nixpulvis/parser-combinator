@@ -19,7 +19,10 @@
          preceded
          terminated
          sep-by*
-         sep-by+)
+         sep-by+
+         tok
+         line+column
+         (struct-out token))
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
@@ -28,6 +31,7 @@
 ; A Value is whatever a parser produces:
 ; - `emp` produces its Value, '() unless it's given one
 ; - `lit`, `rx` and `span` produce the matched String
+; - `tok` produces the matched Token's value
 ; - `skip` produces '()
 ; - `pmap` produces whatever its function returns, given its parsers'
 ;   Values
@@ -51,6 +55,19 @@
 (module private racket/base
   (provide (struct-out result)
            (struct-out matched)
+           (struct-out token)
+           (struct-out lexed)
+           lexed-value
+           lexed-start
+           lexed-kind+start
+           lexed-end
+           make-lexed
+           peek!
+           peek-id!
+           kind-id
+           kind-name
+           kind-count
+           input-length
            parser
            parser?
            parser-run
@@ -68,9 +85,130 @@
   ; - (result Value String)
   (struct result (value remaining) #:transparent)
 
-  ; A Parser is a [String -> Result]
-  ; that matches a prefix of the String. The Result's `remaining` is the
-  ; rest of the String, after the match.
+  ; An Input is one of:
+  ; - String, which the character parsers, like `lit`, match
+  ; - Lexed, a String with a lexer, which `tok` matches a Token at a time
+  ; The combinators only pass the Input and positions in it along, so
+  ; they work over either. A grammar is written over one or the other.
+  ; Positions in a Lexed are positions in its String, so a failure can
+  ; say where it is in the source text.
+
+  ; A Token is a (token Symbol Any Natural Natural)
+  ; a piece of the source text a lexer recognized: its kind, its value,
+  ; and where it begins and ends in the source text. `alt` picks its
+  ; alternatives by the kind of the next Token, as it picks them by the
+  ; next character in a String. Parsing doesn't make Tokens; only
+  ; `tokens`, in lex.rkt, does, to show what a lexer sees.
+  (struct token (kind value start end) #:transparent)
+
+  ; A Lexed is a (lexed String Rule ...)
+  ; a String, and a Rule, from lex.rkt, that skips what's between Tokens
+  ; and matches the next one. Tokens
+  ; are lexed when a parser asks for them, not ahead of time, and the
+  ; last one is kept: `alt` asks for the next Token's kind, and the
+  ; alternative it picks asks again for the same Token. So no Token is
+  ; made, and each is usually lexed once.
+  ; - `at` is the position the kept Token was asked for at, or #f
+  ; - `kind` is its Kind ID, that of 'eof at the end, or #f if nothing
+  ;   matches there
+  ; - `match` is its rule's Match, with its value and where it ends,
+  ;   which `tok` produces as it is, or 'error
+  ; - `furthest` is the furthest position a Token was asked for at,
+  ;   which is about where a failed parse failed
+  ; Only what parsing needs is kept, so where a Token begins, and what's
+  ; at `furthest`, are lexed again when they're needed.
+  (require (only-in racket/vector vector-append))
+  (struct lexed (string rule
+                 [at #:mutable] [kind #:mutable] [match #:mutable]
+                 [furthest #:mutable]))
+
+  ; A Kind ID is a Natural that stands for a kind of Token, so that
+  ; `alt` can look up the next Token's kind in a vector rather than a
+  ; hash. Each kind gets one the first time a `tok` or lexer names it.
+  (define kind-ids (make-hasheq))
+  (define kind-names (vector))
+
+  ; Symbol -> Natural
+  (define (kind-id kind)
+    (or (hash-ref kind-ids kind #f)
+        (let ([id (hash-count kind-ids)])
+          (hash-set! kind-ids kind id)
+          (set! kind-names (vector-append kind-names (vector kind)))
+          id)))
+
+  ; (or/c Natural #f) -> (or/c Symbol #f)
+  (define (kind-name id)
+    (and id (vector-ref kind-names id)))
+
+  ; -> Natural
+  ; How many kinds have IDs.
+  (define (kind-count) (hash-count kind-ids))
+
+  ; Natural
+  (define eof-id (kind-id 'eof))
+
+  ; String Rule -> Lexed
+  (define (make-lexed s rule)
+    (lexed s rule #f #f 'error 0))
+
+  ; Lexed Natural -> (values (or/c Natural #f) Natural)
+  ; The Kind ID of the Token after position `i`, and where it begins,
+  ; without keeping it.
+  (define (lexed-kind+start in i)
+    (let-values ([(id j m) ((lexed-rule in) (lexed-string in) i)])
+      (values id j)))
+
+  ; Lexed -> Natural
+  ; Where the kept Token begins.
+  (define (lexed-start in)
+    (let-values ([(id j) (lexed-kind+start in (lexed-at in))])
+      j))
+
+  ; Lexed -> Any
+  ; The kept Token's value.
+  (define (lexed-value in) (matched-value (lexed-match in)))
+
+  ; Lexed -> Natural
+  ; Where the kept Token ends.
+  (define (lexed-end in)
+    (let ([m (lexed-match in)])
+      (if (matched? m) (matched-end m) (lexed-start in))))
+
+  ; Lexed Natural -> (or/c Symbol #f)
+  ; The kind of the Token after position `i`, after what's skipped
+  ; there, which it keeps along with its value and where it is.
+  (define (peek! in i)
+    (kind-name (peek-id! in i)))
+
+  ; Lexed Natural -> (or/c Natural #f)
+  ; The Kind ID of the Token after position `i`, as for `peek!`. The
+  ; Lexed keeps Kind IDs, not kinds.
+  ; It's a macro, so the check for the kept Token is written out where
+  ; it's used, and only lexing a new Token calls a function.
+  (define-syntax-rule (peek-id! in i)
+    (let ([in* in] [i* i])
+      (if (eq? i* (lexed-at in*))
+          (lexed-kind in*)
+          (lex! in* i*))))
+
+  ; Lexed Natural -> (or/c Natural #f)
+  ; Lexes the Token after position `i`, for `peek-id!`.
+  (define (lex! in i)
+    (let-values ([(id j m) ((lexed-rule in) (lexed-string in) i)])
+      (set-lexed-at! in i)
+      (set-lexed-kind! in id)
+      (set-lexed-match! in m)
+      (when (> i (lexed-furthest in))
+        (set-lexed-furthest! in i))
+      (lexed-kind in)))
+
+  ; Input -> Natural
+  (define (input-length s)
+    (if (string? s) (string-length s) (string-length (lexed-string s))))
+
+  ; A Parser is a [Input -> Result]
+  ; that matches a prefix of the Input. The Result's `remaining` is the
+  ; rest of the Input, after the match.
 
   ; A Match is one of:
   ; - 'error
@@ -96,7 +234,11 @@
       (let ([m ((parser-run self) s 0)])
         (if (symbol? m)
             'error
-            (result (matched-value m) (substring s (matched-end m)))))))
+            (result (matched-value m)
+                    (if (string? s)
+                        (substring s (matched-end m))
+                        (make-lexed (substring (lexed-string s) (matched-end m))
+                                    (lexed-rule s))))))))
 
   ; Run -> Parser
   ; Run Start -> Parser
@@ -120,10 +262,12 @@
   (define (run p s i)
     (if (parser? p)
         ((parser-run p) s i)
-        (let* ([in (substring s i)]
+        (let* ([in (if (string? s)
+                       (substring s i)
+                       (raise-argument-error 'run "parser?" p))]
                [r (p in)])
           (cond [(symbol? r) 'error]
-                [(> (string-length (result-remaining r)) (string-length in))
+                [(> (input-length (result-remaining r)) (input-length in))
                  (raise-arguments-error
                   'run
                   "parser's remaining is longer than its input"
@@ -132,15 +276,16 @@
                   "remaining" (result-remaining r))]
                 [else
                  (matched (result-value r)
-                          (- (string-length s)
-                             (string-length (result-remaining r))))]))))
+                          (- (input-length s)
+                             (input-length (result-remaining r))))]))))
 
-  ; A Start says which characters a parser's matches can begin with. It
-  ; is one of:
-  ; - #f, when it could be any character, or it isn't known
-  ; - (start [Listof Char] Boolean), when it can only be one of the
-  ;   Chars, and, if the Boolean is true, the parser can also match
-  ;   without consuming anything
+  ; A Start says which characters, or which kinds of Token, a parser's
+  ; matches can begin with. It is one of:
+  ; - #f, when it could be anything, or it isn't known
+  ; - (start [Listof (or/c Char Symbol)] Boolean), when it can only be
+  ;   one of the Chars, or a Token of one of the kinds, and, if the
+  ;   Boolean is true, the parser can also match without consuming
+  ;   anything
   ; So (start '() #t) is the Start of a parser that only matches nothing,
   ; like `emp`, and (start '() #f) of one that never matches.
   (struct start (chars empty?))
@@ -225,16 +370,40 @@
 
 (require 'private)
 
-; Parser String -> Value
-(define (parse p str)
-  (let ([m (run p str 0)])
-    (cond [(symbol? m)
-           (error "bad input, got error")]
-          [(< (matched-end m) (string-length str))
-           (error "bad input, had leftover text"
-                  (substring str (matched-end m)))]
-          [else
-           (matched-value m)])))
+; Parser Input -> Value
+(define (parse p in)
+  (if (string? in)
+      (let ([m (run p in 0)])
+        (cond [(symbol? m)
+               (error "bad input, got error")]
+              [(< (matched-end m) (string-length in))
+               (error "bad input, had leftover text"
+                      (substring in (matched-end m)))]
+              [else
+               (matched-value m)]))
+      (let ([m (run p in 0)])
+        (if (and (matched? m) (eq? (peek! in (matched-end m)) 'eof))
+            (matched-value m)
+            (let*-values ([(id at) (lexed-kind+start
+                                    in
+                                    (if (matched? m) (matched-end m) (lexed-furthest in)))]
+                          [(line column) (line+column (lexed-string in) at)])
+              (error 'parse "unexpected ~a at line ~a, column ~a"
+                     (case (kind-name id)
+                       [(eof) "end of input"]
+                       [(#f) (format "text ~s" (let ([s (lexed-string in)])
+                                                 (substring s at (min (string-length s) (+ at 10)))))]
+                       [else (kind-name id)])
+                     line column))))))
+
+; String Natural -> (values Natural Natural)
+; The line and column, both from 1, of position `i` in `s`. It's worked
+; out only when it's needed, for an error message.
+(define (line+column s i)
+  (for/fold ([line 1] [column 1]) ([c (in-string s 0 i)])
+    (if (char=? c #\newline)
+        (values (add1 line) 1)
+        (values line (add1 column)))))
 
 ; (once x expr)
 ; The value of the variable `x`, which is #f until this first sets it to
@@ -482,10 +651,12 @@
        (((once choose (chooser ps)) s i) s i))
      (lambda () (alt-start ps)))))
 
-; [Listof Parser] -> [String Natural -> Run]
+; [Listof Parser] -> [Input Natural -> Run]
 ; Picks the Run that tries just the parsers in `ps` that could match from
 ; position `i` of `s`, by the next character. A Run for each ASCII
 ; character is kept in a vector, and for other characters in a hash.
+; In a Lexed, it looks up the kind of the next Token in the hash
+; instead.
 (define (chooser ps)
   (let* ([sts (map start-of ps)]
          [chars (remove-duplicates
@@ -502,16 +673,27 @@
          [ascii (for/vector #:length 128 ([n (in-range 128)])
                   (let ([c (integer->char n)])
                     (if (memv c chars) (for-char c) otherwise)))]
-         [unicode (for/hasheqv ([c (in-list chars)]
-                                #:when (>= (char->integer c) 128))
-                    (values c (for-char c)))])
+         ; The other characters, and the kinds of Token.
+         [others (for/hasheqv ([c (in-list chars)]
+                               #:unless (and (char? c) (< (char->integer c) 128)))
+                   (values c (for-char c)))]
+         ; A Run for each kind of Token, by its Kind ID.
+         [kinds (let ([v (make-vector (kind-count) otherwise)])
+                  (for ([k (in-list chars)] #:when (symbol? k))
+                    (vector-set! v (kind-id k) (for-char k)))
+                  v)])
     (lambda (s i)
-      (if (< i (string-length s))
-          (let ([n (char->integer (string-ref s i))])
-            (if (< n 128)
-                (vector-ref ascii n)
-                (hash-ref unicode (string-ref s i) (lambda () otherwise))))
-          otherwise))))
+      (if (string? s)
+          (if (< i (string-length s))
+              (let ([n (char->integer (string-ref s i))])
+                (if (< n 128)
+                    (vector-ref ascii n)
+                    (hash-ref others (string-ref s i) (lambda () otherwise))))
+              otherwise)
+          (let ([id (peek-id! s i)])
+            (if (and id (< id (vector-length kinds)))
+                (vector-ref kinds id)
+                otherwise))))))
 
 ; [Listof Parser] -> Run
 ; Matches what the first of `ps` to match does.
@@ -553,6 +735,34 @@
      (let ([m (run p s i)])
        (if (and (matched? m) (ok? (matched-value m))) m 'error)))
    (lambda () (start-of p))))
+
+; Symbol -> Parser
+; Symbol Any -> Parser
+; Matches one Token of the kind `kind`, producing its value. Given a
+; `value` too, it only matches a Token whose value is `equal?` to it,
+; such as a keyword among the identifiers. It works over a Lexed, as
+; the character parsers above work over a String.
+(define tok
+  (case-lambda
+    [(kind)
+     (let ([id (kind-id kind)])
+       (parser
+        (lambda (s i)
+          (if (eq? (peek-id! s i) id)
+              (lexed-match s)
+              'error))
+        (start (list kind) #f)
+        kind))]
+    [(kind value)
+     (let ([id (kind-id kind)])
+       (parser
+        (lambda (s i)
+          (if (and (eq? (peek-id! s i) id)
+                   (equal? (lexed-value s) value))
+              (matched value (lexed-end s))
+              'error))
+        (start (list kind) #f)
+        kind))]))
 
 ; The combinators below are made from the kernel's.
 
