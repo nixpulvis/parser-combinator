@@ -11,6 +11,6 @@
 (define compile-omit-paths '("scripts"))
 (define test-omit-paths '("scripts"))
 (define pkg-desc "Parser combinators and a JSON parser.")
-(define version "1.0.1")
+(define version "1.90")
 (define pkg-authors '(nixpulvis))
 (define license 'MIT)
