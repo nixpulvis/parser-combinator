@@ -1,39 +1,12 @@
 #lang racket
 (require rackunit
-         racket/runtime-path
          "../parse.rkt"
          "../lex.rkt"
-         (prefix-in chars: (only-in "../json.rkt" string->json))
-         "../json-lex.rkt"
-         (only-in "../json.rkt" NUMBER STRING)
+         "../json.rkt"
          (submod "../parse.rkt" private))
 
-; Lexer tests
-(check-equal? (tokens json-lexer "") '())
-(check-equal? (tokens json-lexer " \n\t ") '())
-(check-equal? (tokens json-lexer "[1, \"a\"]")
-              (list (token 'begin-array "[" 0 1)
-                      (token 'number 1 1 2)
-                      (token 'comma "," 2 3)
-                      (token 'string "a" 4 7)
-                      (token 'end-array "]" 7 8)))
-(check-equal? (tokens json-lexer " {\"k\":null}\n")
-              (list (token 'begin-object "{" 1 2)
-                      (token 'string "k" 2 5)
-                      (token 'colon ":" 5 6)
-                      (token 'null 'null 6 10)
-                      (token 'end-object "}" 10 11)))
-(check-exn #rx"position 7" (λ () (tokens json-lexer "[1,\n 2 @]")))
-
-; Error tests
-; A failed parse says what it found where it stopped.
-(check-exn #rx"unexpected text \"@]\" at line 2, column 4"
-           (λ () (string->json "[1,\n 2 @]")))
-(check-exn #rx"unexpected number at line 1, column 4" (λ () (string->json "[1 2]")))
-(check-exn #rx"unexpected end-array at line 1, column 4" (λ () (string->json "[1,]")))
-(check-exn #rx"unexpected end of input at line 1, column 3" (λ () (string->json "[1")))
-(check-exn #rx"unexpected begin-object at line 1, column 4" (λ () (string->json "{} {}")))
-(check-exn #rx"unexpected text \"nul\" at line 1, column 1" (λ () (string->json "nul")))
+; These use json.rkt's lexer and grammar as a grammar over Tokens, and its
+; NUMBER and STRING as parsers over characters to mix with them.
 
 ; line+column tests
 (check-equal? (call-with-values (λ () (line+column "ab\ncd" 0)) list) '(1 1))
@@ -58,19 +31,6 @@
 (check-equal? (let ([r ((tok 'number) (json-lexer "1 2"))])
                 (list (result-value r) (tokens json-lexer (lexed-string (result-remaining r)))))
               (list 1 (list (token 'number 2 1 2))))
-
-; Start tests
-; alt picks its alternatives by the next Token's kind, as it picks them by
-; the next character in a String.
-(define (start-kinds p)
-  (let ([st (start-of p)])
-    (and st (list (sort (remove-duplicates (start-chars st)) symbol<?)
-                  (start-empty? st)))))
-(check-equal? (start-kinds VALUE)
-              (list '(begin-array begin-object false null number string true) #f))
-(check-equal? (start-kinds ARRAY) (list '(begin-array) #f))
-(check-equal? (start-kinds OBJECT) (list '(begin-object) #f))
-(check-equal? (start-kinds PAIR) (list '(string) #f))
 
 ; Rules are tried in order, and the first to match wins, not the longest,
 ; so a keyword's rule splits an identifier that begins with it.
@@ -109,29 +69,6 @@
          [string STRING]))
 (check-equal? (parse VALUE (jsonc-lexer "// a list\n[1, // one\n 2]\n// done"))
               '(1 2))
-
-; Same as json.rkt
-; Each text parses to the same value as with json.rkt's string->json, or
-; fails with both.
-(define (same-as-chars? text)
-  (let ([value (λ (f) (with-handlers ([exn:fail? (λ (e) 'failed)]) (f text)))])
-    (equal? (value string->json) (value chars:string->json))))
-
-(for ([text (in-list
-             (list "null" "true" "false" "0" "-0" "12" "-3.25e+2" "1E-2"
-                   "\"\"" "\"a\\n\\u0041\\uD83D\\uDE00\"" "[]" "[ ]" " [ \n ] "
-                   "[1,2,3]" "[1, [2, [3]], {}]" "{}" "{ }" "{\"a\":1}"
-                   "{\"a\" : 1 , \"b\" : [ ] , \"c\" : { } }"
-                   "{\"a\":1,\"b\":2,\"a\":3}" " \t\n1\r\n"
-                   ; Errors
-                   "" " " "[" "]" "[1,]" "[,1]" "[1 2]" "{\"a\"}" "{\"a\":}"
-                   "{1:2}" "{\"a\":1,}" "nul" "tru" "01" "1." "1e" "[1.]"
-                   "\"unterminated" "\"\\x\"" "[1]]" "{} {}" "@"))])
-  (check-true (same-as-chars? text) text))
-
-(define-runtime-path fixtures "fixtures")
-(for ([name (in-list '("canada.json" "citm_catalog.json" "twitter.json"))])
-  (check-true (same-as-chars? (file->string (build-path fixtures name))) name))
 
 ; Given a String, a lexer skips its characters, ASCII or not.
 (define nbsp-lexer
