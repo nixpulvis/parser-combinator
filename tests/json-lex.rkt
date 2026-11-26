@@ -140,3 +140,31 @@
          [number (span "0123456789")]))
 (check-equal? (map token-value (tokens nbsp-lexer " 1 ,  2 "))
               '("1" "," "2"))
+
+; Mixing tests
+; Character parsers work in a grammar over Tokens, from the same
+; positions. They match exactly what's there, so unlike a Token, they
+; don't skip whitespace before themselves.
+(define names
+  (lexer #:skip " "
+         [ident (span "abcdefghijklmnopqrstuvwxyz")]))
+(define address (seq (tok 'ident) (lit "@") (tok 'ident)))
+(check-equal? (parse address (names "a@b")) '("a" "@" "b"))
+(check-equal? (parse address (names " a@ b ")) '("a" "@" "b"))
+(check-exn exn:fail? (λ () (parse address (names "a @b"))))
+; alt tries a character parser whatever the next Token is, even where
+; no Token begins.
+(check-equal? (parse (star (alt (tok 'ident) (lit "#"))) (names "a#b#"))
+              '("a" "#" "b" "#"))
+; json.rkt's STRING is a character parser, so it works over Tokens too.
+(check-equal? (parse (seq (tok 'ident) (lit ":") STRING) (names "k:\"\\u0041\""))
+              '("k" ":" "A"))
+; with-lexer goes the other way: a grammar over characters uses one over
+; Tokens for part of its text.
+(define setting
+  (seq (span "abcdefghijklmnopqrstuvwxyz") (lit "=") (with-lexer json-lexer VALUE)))
+(check-equal? (parse setting "a=[1, {\"b\" : null} ]") '("a" "=" (1 #hasheq((b . null)))))
+(check-exn exn:fail? (λ () (parse setting "a =[1]")))
+; Or a grammar over Tokens uses another lexer's.
+(check-equal? (parse (seq (tok 'ident) (with-lexer json-lexer VALUE)) (names "x [1, 2]"))
+              '("x" (1 2)))

@@ -1,11 +1,12 @@
 #lang racket/base
 (require (only-in "parse.rkt" token [skip skip-chars])
          (only-in (submod "parse.rkt" private)
-                  make-lexed lexed-value lexed-start lexed-end peek!
+                  [parser parser-with-start] input-string make-lexed lexed-value lexed-start lexed-end peek!
                   run parser? parser-run matched-end start-of start-chars start-empty? kind-id))
 
 (provide lexer
-         tokens)
+         tokens
+         with-lexer)
 
 ; ---------------------------
 ; ----- Lexing to Tokens -----
@@ -106,6 +107,21 @@
                              (loop (cdr rs))]
                             [(caar rs) (values (caar rs) i m)]
                             [else (next (matched-end m))])))))))))))
+
+; Lexer Parser -> Parser
+; Matches what `p` does, over the Tokens `lex` finds from where it's
+; run. It lets a grammar over characters use one over Tokens for part of
+; its text, such as a JSON value after a key in a config file, and a
+; grammar over Tokens use another lexer's for part of its own, such as
+; the code inside a string. Positions are the same in either, so `p`
+; picks up where the grammar around it is, and it, where `p` ends.
+; Nothing is known about what `p` begins with in characters, so `alt`
+; always tries it.
+(define (with-lexer lex p)
+  (parser-with-start
+   (lambda (s i)
+     (run p (lex (input-string s)) i))
+   #f))
 
 ; Parser -> Run
 (define (as-run p)

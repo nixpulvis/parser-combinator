@@ -68,6 +68,7 @@
            kind-name
            kind-count
            input-length
+           input-string
            parser
            parser?
            parser-run
@@ -201,6 +202,12 @@
       (when (> i (lexed-furthest in))
         (set-lexed-furthest! in i))
       (lexed-kind in)))
+
+  ; Input -> String
+  ; The text of `s`, which the character parsers match, whether or not
+  ; it's been given a lexer.
+  (define-syntax-rule (input-string s)
+    (let ([s* s]) (if (string? s*) s* (lexed-string s*))))
 
   ; Input -> Natural
   (define (input-length s)
@@ -354,14 +361,17 @@
            parser
            parser?
            parser-run
-           run)
+           run
+           input-string)
 
   (require (rename-in (submod ".." private) [parser parser-with-start]))
 
   ; Run -> Parser
   ; Run Name -> Parser
   ; Makes a parser from a Run written by hand, with the name #f, or the
-  ; given one. `alt` always tries it, since it can't tell what such a
+  ; given one. Its input can be a Lexed, when it's part of a grammar
+  ; over Tokens, so a Run that reads characters gets them from
+  ; (input-string s). `alt` always tries it, since it can't tell what such a
   ; parser begins with.
   (define-syntax parser
     (syntax-rules ()
@@ -448,7 +458,8 @@
 (define (lit str)
   (let ([len (string-length str)])
     (parser
-     (lambda (s i)
+     (lambda (in i)
+       (define s (input-string in))
        (if (and (<= (+ i len) (string-length s))
                 (let loop ([k 0])
                   (or (= k len)
@@ -468,7 +479,8 @@
   (let ([anchored ((if (pregexp? pattern) pregexp regexp)
                    (string-append "^(?:" (object-name pattern) ")"))])
     (parser
-     (lambda (s i)
+     (lambda (in i)
+       (define s (input-string in))
        (let ([m (regexp-match-positions anchored s i)])
          (if m
              (matched (substring s i (cdar m)) (cdar m))
@@ -504,7 +516,8 @@
 (define-syntax-rule (scan ok? (s i j) body)
   (if (string? ok?)
       (let-values ([(ascii others) (char-table ok?)])
-        (lambda (s i)
+        (lambda (in i)
+          (define s (input-string in))
           (let ([j (let loop ([j i])
                      (if (< j (string-length s))
                          (let* ([c (string-ref s j)] [n (char->integer c)])
@@ -513,7 +526,8 @@
                                j))
                          j))])
             body)))
-      (lambda (s i)
+      (lambda (in i)
+        (define s (input-string in))
         (let ([j (let loop ([j i])
                    (if (and (< j (string-length s)) (ok? (string-ref s j)))
                        (loop (add1 j))
@@ -677,10 +691,23 @@
          [others (for/hasheqv ([c (in-list chars)]
                                #:unless (and (char? c) (< (char->integer c) 128)))
                    (values c (for-char c)))]
+         ; In a Lexed, a parser that begins with a character, like `lit`,
+         ; can be mixed with Tokens. Whether it matches depends on the
+         ; character there, not the Token, so it's always tried.
+         ; [Maybe Symbol] -> Run
+         [for-kind
+          (lambda (k)
+            (first-of (for/list ([p (in-list ps)] [st (in-list sts)]
+                                 #:when (or (not st)
+                                            (start-empty? st)
+                                            (and k (memq k (start-chars st)))
+                                            (ormap char? (start-chars st))))
+                        p)))]
+         [otherwise-kind (for-kind #f)]
          ; A Run for each kind of Token, by its Kind ID.
-         [kinds (let ([v (make-vector (kind-count) otherwise)])
+         [kinds (let ([v (make-vector (kind-count) otherwise-kind)])
                   (for ([k (in-list chars)] #:when (symbol? k))
-                    (vector-set! v (kind-id k) (for-char k)))
+                    (vector-set! v (kind-id k) (for-kind k)))
                   v)])
     (lambda (s i)
       (if (string? s)
@@ -693,7 +720,7 @@
           (let ([id (peek-id! s i)])
             (if (and id (< id (vector-length kinds)))
                 (vector-ref kinds id)
-                otherwise))))))
+                otherwise-kind))))))
 
 ; [Listof Parser] -> Run
 ; Matches what the first of `ps` to match does.

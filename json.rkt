@@ -160,7 +160,8 @@
 ; `span` can't match a fixed number of characters.
 (define CODE-UNIT
   (parser
-   (lambda (s i)
+   (lambda (in i)
+     (define s (input-string in))
      (let ([end (+ i 4)])
        (if (<= end (string-length s))
            (let loop ([j i] [n 0])
