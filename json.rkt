@@ -152,7 +152,7 @@
 
 ; Parser
 ; Matches a run of digits.
-(define DIGITS (span "0123456789"))
+(define-parser DIGITS (span "0123456789"))
 
 ; Parser
 ; Plain text is matched a run at a time with `span`, rather than a
