@@ -4,7 +4,8 @@
          "../lex.rkt"
          "../json.rkt"
          (submod "../json.rkt" tokens)
-         (submod "../parse.rkt" private))
+         (submod "../parse.rkt" private)
+         (prefix-in positions: (only-in (submod "../parse.rkt" positions) parser)))
 
 ; These use json.rkt's lexer and its grammar over Tokens, and its NUMBER
 ; and STRING as parsers over characters to mix with them.
@@ -157,6 +158,43 @@
 (check-equal? (parse (seq SETTING (lit " ;")) "a=[1] ;") '(("a" "=" (1)) " ;"))
 (check-exn #rx"unexpected text \" ;\" at line 1, column 6"
            (λ () (parse (seq SETTING (lit ";")) "a=[1] ;")))
+; Where the grammar around it fails at that whitespace, the error says
+; what's there, though the lexer would skip it to say what follows.
+(define LIST (with-lexer json-lexer (sep-by+ JSON-VALUE (tok 'value-separator))))
+(check-exn #rx"^parse: unexpected text \" ;\" at line 1, column 7\n"
+           (λ () (parse (seq (lit "a=") LIST (lit ";")) "a=1, 2 ;")))
+; That goes for whitespace before the end of the text too, so a grammar
+; that ends each value with a newline takes the last one itself.
+(check-equal? (parse (seq VALUE (lit "\n")) "1\n") '(1 "\n"))
+(check-equal? (parse (star (terminated SETTING (lit "\n"))) "a=1\nb=[1,\n2]\n")
+              '(("a" "=" 1) ("b" "=" (1 2))))
+(check-exn #rx"^parse: unexpected text \" \" at line 1, column 7\n  expected: value-separator or \";\"$"
+           (λ () (parse (seq (lit "a=") LIST (lit ";")) "a=1, 2 ")))
+; To parse, the end of the text is a Token of the lexer whose parser
+; matched last, so what it skips can end the text, as it can begin it.
+(check-equal? (parse SETTING "a=[1] \n") '("a" "=" (1)))
+(check-equal? (parse LIST " 1, 2 ") '(1 2))
+; Not after a match that ends with characters.
+(check-exn #rx"^parse: unexpected text \" \" at line 1, column 3\n  expected: end of input$"
+           (λ () (parse (seq VALUE (lit ";")) "1; ")))
+; Nor after one that's dropped: where what follows it fails, `where`
+; rejects it, or a Run written by hand that ran it fails, and the text
+; is matched by characters instead.
+(check-exn #rx"^parse: unexpected text \" \" at line 1, column 2\n"
+           (λ () (parse (alt (seq VALUE (lit "!")) (lit "1")) "1 ")))
+(check-exn #rx"^parse: unexpected text \" \" at line 1, column 2\n"
+           (λ () (parse (alt (where string? VALUE) (lit "1")) "1 ")))
+(define VALUE-THEN-FAIL
+  (positions:parser (lambda (in i) (run VALUE in i) 'error)))
+(check-exn #rx"^parse: unexpected text \" \" at line 1, column 2\n"
+           (λ () (parse (alt VALUE-THEN-FAIL (lit "1")) "1 ")))
+(check-equal? (parse (seq VALUE (opt (lit "!"))) "1 ") '(1 ()))
+(check-equal? (parse (alt (seq VALUE (lit "!")) VALUE) "1 ") 1)
+(check-equal? (parse (seq VALUE (opt (seq (lit ",") VALUE (lit "!")))) "1 ") '(1 ()))
+; What follows such a match that isn't the end is said as that lexer
+; sees it.
+(check-exn #rx"^parse: unexpected text \"x\" at line 1, column 6\n  expected: value-separator or end of input$"
+           (λ () (parse LIST "1, 2 x")))
 ; Where the parse got furthest in the grammar over Tokens, the error says
 ; it in Tokens.
 (check-exn #rx"unexpected number at line 1, column 6"
@@ -167,6 +205,14 @@
 ; JSON's VALUE brings json-lexer with it, so it works in any grammar.
 (check-equal? (parse (seq (lit "a=") VALUE (lit ";")) "a= [1];") '("a=" (1) ";"))
 (check-equal? (parse (seq (tok 'ident) VALUE) (ident-lexer "x [1]")) '("x" (1)))
+; The same goes under repetition, and a parser applied to its input
+; leaves the whitespace after its match in what remains.
+(check-equal? (parse (star VALUE) "1 2 3 ") '(1 2 3))
+(check-equal? (result-remaining (VALUE "1 ")) " ")
+; Where a match ends before whitespace that the grammar around it
+; doesn't take, the error says it as that grammar has it.
+(check-exn #rx"^parse: unexpected text \"  \" at line 1, column 1\n  expected: VALUE or end of input$"
+           (λ () (parse (opt VALUE) "  ")))
 ; What a lexer made can be parsed again, and how far an earlier parse
 ; of it got doesn't count toward a later one.
 (define parsed-twice (json-lexer "[1, 2]"))

@@ -185,8 +185,8 @@
 (check-equal? (parse VALUE (json-lexer " \t[ 1 ,\n2 ]\r\n"))
               (list 1 2))
 ; Each of them takes a string too, lexing it with json-lexer itself. The
-; whitespace before the value belongs to its first Token; that after it
-; is left over, as in any grammar over characters.
+; whitespace before the value belongs to its first Token, and to parse,
+; the end of the text is a Token too, so whitespace can come before it.
 (check-equal? (parse VALUE " \t[ 1 ,\n2 ]")
               (list 1 2))
 (check-equal? (parse ARRAY " [1, 2]")
@@ -195,8 +195,8 @@
               (hasheq 'a 1))
 (check-equal? (parse PAIR "\"a\" : true")
               (cons 'a #t))
-(check-exn #rx"unexpected text \" \" at line 1, column 4"
-           (λ () (parse VALUE "[1] ")))
+(check-equal? (parse VALUE "[1] \n")
+              (list 1))
 (check-exn #rx"unexpected value-separator at line 1, column 4"
            (λ () (parse ARRAY "[1,,2]")))
 
@@ -220,6 +220,14 @@
            (λ () (string->json "[1, \"caf\\u12G4\"]")))
 (check-exn #rx"unexpected end of input at line 1, column 16\n  lexing: string$"
            (λ () (string->json "[\"unterminated]")))
+; A parser with its lexer around it says the same of a string, past the
+; whitespace before the first token.
+(check-exn #rx"^parse: unexpected end of input at line 3, column 6\n  lexing: null$"
+           (λ () (parse VALUE "\n\n  nul")))
+(check-exn #rx"^parse: unexpected text \"@\" at line 1, column 3\n  expected: VALUE$"
+           (λ () (parse VALUE "  @")))
+(check-exn #rx"^parse: unexpected end of input at line 1, column 3\n  expected: VALUE$"
+           (λ () (parse VALUE "  ")))
 ; Lookahead past a token that was lexed doesn't count: the 2 is a number,
 ; and no token begins with the dot.
 (check-exn #rx"unexpected text \".e5]\" at line 1, column 6\n  expected: value-separator or end-array\n  in: JSON-ARRAY$"

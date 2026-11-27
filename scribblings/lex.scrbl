@@ -109,10 +109,12 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
  grammar over tokens use another lexer. What @racket[lex] skips belongs
  to the token after it, so @racket[p] takes the skipped text before its
  tokens, and leaves anything after its match to the surrounding
- grammar. When the parse gets furthest inside @racket[p],
- @racket[parse]'s error describes it in @racket[lex]'s tokens. Given an
- @Input that @racket[lex] made, @racket[p] runs over its tokens
- directly.
+ grammar. To @racket[parse], the end of the text is a token of
+ @racket[lex] too, so what @racket[lex] skips can follow a match of
+ @racket[p] that ends the text. When the parse gets furthest inside
+ @racket[p], @racket[parse]'s error describes it in @racket[lex]'s
+ tokens. Given an @Input that @racket[lex] made, @racket[p] runs over
+ its tokens directly.
 
 @examples[#:eval lex-eval
 (define SUM-SETTING
@@ -120,7 +122,7 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
        (with-lexer sum-lexer SUM)
        (lit ";")))
 (parse SUM-SETTING "sum=1 + 2;")
-(eval:error (parse SUM-SETTING "sum=1 2;"))
+(eval:error (parse SUM-SETTING "sum=1 + + 2;"))
 ]}
 
 @defproc[(tokens [lex #,Lexer] [str string?]) (listof token?)]{

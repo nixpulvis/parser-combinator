@@ -4,7 +4,7 @@
                   [parser parser-with-start] token struct:token token? token-kind token-value
                   token-start token-end source-text source-match source-scanner source-reach
                   source-explaining set-source-explaining! make-source no-lexer reach!
-                  kept-value kept-start kept-end keep-inner! peek! peek-id! run parser?
+                  kept-value kept-start kept-end keep-inner! end-inner! peek! peek-id! run parser?
                   parser-run matched matched-end start start-of start-chars kind-id kind-name fail!
                   end-kind raise-unexpected))
 
@@ -194,8 +194,10 @@
 ; Given a Source of `lex`'s own, `p` runs over it as it is. Otherwise
 ; `p` runs over a Source of `lex`'s, which is kept, so where the parse
 ; got furthest inside it is said in its Tokens, and which explains its
-; part of a failed parse as `in` does. Nothing is known about what `p`
-; begins with in characters, so `alt` always tries it.
+; part of a failed parse as `in` does. Where its match ends is noted
+; too, so `parse` can tell that what `lex` skips after it ends the text.
+; Nothing is known about what `p` begins with in characters, so `alt`
+; always tries it.
 (define (with-lexer lex p)
   (unless (scanning-lexer? lex)
     (raise-argument-error 'with-lexer "lexer?" lex))
@@ -210,6 +212,8 @@
              (set-source-explaining! inner (source-explaining in))
              (let ([m (run p inner i)])
                (keep-inner! in inner)
+               (unless (symbol? m)
+                 (end-inner! in inner (matched-end m)))
                m))))
      #f)))
 

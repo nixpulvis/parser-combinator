@@ -50,8 +50,9 @@
 ; around it, so they take a String, or the Source `json-lexer` makes, or
 ; work in any other grammar, of characters or of another lexer's Tokens.
 ; Like any Token, the first takes the whitespace before it, and the
-; whitespace after the last is left to what comes next. The grammar
-; itself, over JSON's Tokens alone, is provided by the `tokens` submodule.
+; whitespace after the last is left to what comes next, which for
+; `parse` can be the end of the text. The grammar itself, over JSON's
+; Tokens alone, is provided by the `tokens` submodule.
 
 (define-parser VALUE (with-lexer json-lexer JSON-VALUE))
 (define-parser ARRAY (with-lexer json-lexer JSON-ARRAY))

@@ -22,7 +22,9 @@
  applies @Parser @racket[p] to the @Input @racket[in] and produces the
  resulting @|Value|.
  Unlike applying @racket[p] directly, @racket[parse] demands that
- @racket[p] consume all of @racket[in]. It raises @racket[exn:fail] if
+ @racket[p] consume all of @racket[in]. After a match that ends with
+ that of a parser made by @racket[with-lexer], what its lexer skips can
+ be left. It raises @racket[exn:fail] if
  @racket[p] fails or leaves text over. The error gives the line and
  column where the parse got furthest: the furthest position any parser
  failed at, or where @racket[p]'s match ended. It may add these fields,

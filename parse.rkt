@@ -58,6 +58,11 @@
            raise-unexpected
            source-reach
            keep-inner!
+           end-inner!
+           ended-at
+           ended-inner
+           set-ended-inner!
+           at-end?
            (struct-out source)
            input?
            input-text
@@ -129,11 +134,16 @@
   ; - `match` is its lexer rule's Match, with its value and where it
   ;   ends, which `tok` produces as it is, or 'error
   ; - `furthest` is the furthest position a parser failed at, or a Token
-  ;   was asked for at, which is about where a failed parse failed
+  ;   was asked for at, which is about where a failed parse failed, or -1
+  ;   before either has happened, which isn't having failed at 0
   ; - `inner` is the Source that `with-lexer` made, of another lexer, and
   ;   ran its parser over, that got furthest, or #f
   ; - `explaining` is the Explanation of a failed parse being run again to
   ;   find which named parser it failed in, or #f
+  ; - `ended` is the Source that `with-lexer` made whose parser's match
+  ;   ended furthest along, or #f
+  ; - `end` is where the match of the parser `with-lexer` ran over this
+  ;   Source ended, or #f
   ; Only what parsing needs is kept, so where a Token begins, and what's
   ; at `furthest`, are scanned again when they're needed.
   (require (only-in racket/vector vector-append)
@@ -146,7 +156,8 @@
   ; benches, over a plain struct.
   (struct source (text scanner chars
                   [at #:mutable] [kind #:mutable] [match #:mutable]
-                  [furthest #:mutable] [inner #:mutable] [explaining #:mutable])
+                  [furthest #:mutable] [inner #:mutable] [explaining #:mutable]
+                  [ended #:mutable] [end #:mutable])
     #:constructor-name raw-source
     #:authentic #:sealed)
 
@@ -181,12 +192,12 @@
   (define (make-source s scanner)
     (raw-source s scanner
                 (and (not (eq? scanner no-lexer))
-                     (raw-source s no-lexer #f #f #f 'error 0 #f #f))
-                #f #f 'error 0 #f #f))
+                     (raw-source s no-lexer #f #f #f 'error -1 #f #f #f #f))
+                #f #f 'error -1 #f #f #f #f))
 
-  ; Source -> Natural
+  ; Source -> Integer
   ; The furthest position the parse got to in `in`, or in a Source that
-  ; `with-lexer` made of the same text from it.
+  ; `with-lexer` made of the same text from it, or -1 if it got nowhere.
   (define (source-reach in)
     (let ([inner (source-inner in)])
       (if inner
@@ -200,6 +211,47 @@
     (let ([kept (source-inner in)])
       (when (or (not kept) (> (source-reach inner) (source-reach kept)))
         (set-source-inner! in inner))))
+
+  ; Source Source Natural -> Void
+  ; Notes that the match of the parser `with-lexer` ran over `inner`,
+  ; which it made of the text of `in`, ended at position `e`, and keeps
+  ; `inner` if no such match ended further along.
+  (define (end-inner! in inner e)
+    (set-source-end! inner e)
+    (let ([kept (source-ended in)])
+      (when (or (not kept) (>= e (source-end kept)))
+        (set-source-ended! in inner))))
+
+  ; Source Natural -> (or/c Source #f)
+  ; The Source that `with-lexer` made of the text of `in` whose parser's
+  ; match ended at position `i`, if the furthest such match ended there.
+  (define (ended-at in i)
+    (let ([inner (source-ended in)])
+      (and inner (= (source-end inner) i) inner)))
+
+  ; (ended-inner in) : (or/c Source #f)
+  ; (set-ended-inner! in inner) : Void
+  ; The Source's `ended`, its tenth field, without checking that `in` is
+  ; a Source, as for `unsafe-source-text`. A parser that drops a match it
+  ; made, since what follows it failed, puts back what it was before, so
+  ; a `with-lexer` match that isn't part of the parse isn't one that ends
+  ; it.
+  (define-syntax-rule (ended-inner in)
+    (unsafe-struct*-ref in 9))
+  (define-syntax-rule (set-ended-inner! in inner)
+    (unsafe-struct*-set! in 9 inner))
+
+  ; Source Natural -> Boolean
+  ; Whether a match that ends at position `i` of `in` ends its text: `i`
+  ; is the end, or with a lexer, the next Token is. What a lexer skips
+  ; belongs to the Token after it, and the end is one, so that's also so
+  ; for the lexer of a `with-lexer` parser whose match ended at `i`.
+  (define (at-end? in i)
+    (or (if (eq? (source-scanner in) no-lexer)
+            (= i (string-length (source-text in)))
+            (eq? (peek! in i) end-kind))
+        (let ([inner (ended-at in i)])
+          (and inner (at-end? inner i)))))
 
   ; Scanner
   ; The Scanner of a Source made from a string, which has no Tokens, so
@@ -248,14 +300,16 @@
   ; Token there, or with no lexer, the text, by line and column, what was
   ; `expected` there, if it's known, and the named parser the parse was
   ; `inside` there, if any. Where the parse got there in an inner Source,
-  ; and no further in `in`, it's said as the inner Source's lexer sees
-  ; it. Where no Token begins, the lexer's rules that could begin there
-  ; are tried again, and it's said where the one that got furthest got
-  ; to, and that it was lexing that rule's kind, and nothing of the
-  ; grammar, which has no part in what a Token is.
+  ; and `in`'s own parsers didn't fail there, it's said as the inner
+  ; Source's lexer sees it. Otherwise it's said as `in` has it, since the
+  ; inner lexer would skip what's there before saying what follows. Where
+  ; no Token begins, the lexer's rules that could begin there are tried
+  ; again, and it's said where the one that got furthest got to, and that
+  ; it was lexing that rule's kind, and nothing of the grammar, which has
+  ; no part in what a Token is.
   (define (raise-unexpected who in i [inside #f] [expected '()])
     (let ([inner (source-inner in)])
-      (if (and inner (>= (source-reach inner) i))
+      (if (and inner (>= (source-reach inner) i) (< (source-furthest in) i))
           (raise-unexpected who inner i inside expected)
           (let*-values ([(s) (source-text in)]
                         [(kind at lexing)
@@ -583,12 +637,19 @@
 
   ; (failing-where-run run) : Run
   ; The Run `run`, but where it fails, it fails at the position it was
-  ; run from, so a parse that fails there is reported there.
+  ; run from, so a parse that fails there is reported there. What it
+  ; matched with other parsers before it failed isn't part of the parse,
+  ; so the Source's `ended` is put back as it was.
   (define-syntax-rule (failing-where-run run)
     (let ([r run])
       (lambda (in i)
-        (let ([m (r in i)])
-          (if (symbol? m) (fail! in i) m)))))
+        (let* ([kept (ended-inner in)]
+               [m (r in i)])
+          (if (symbol? m)
+              (begin
+                (set-ended-inner! in kept)
+                (fail! in i))
+              m)))))
 
   ; (named-failing-where-run run name) : Run
   ; The Run `run`, as `failing-where-run` makes it, and the Run of a
@@ -646,22 +707,29 @@
 ; saying what it found where the parse got furthest: where a parser
 ; failed, a Token was asked for, or the match ended, whichever is
 ; furthest along. Checking for the end after a match asks for the Token
-; after it, so over Tokens, that's at least where the match ended. The
-; error also says what was expected there, and the innermost named
-; parser that the parse got there inside, which `p` is run again to
-; find.
+; after it, so over Tokens, that's at least where the match ended. A
+; match that ends with a `with-lexer` parser's is checked with its
+; lexer too, so what that lexer skips can end the text, as it can begin
+; it. The error also says what was expected there, and the innermost
+; named parser that the parse got there inside, which `p` is run again
+; to find.
 (define (parse p x)
   (check-parsers 'parse p)
   (let* ([in (new-source 'parse x)]
          [m (run p in 0)])
     (if (and (matched? m)
-             (if (eq? (source-scanner in) no-lexer)
-                 (= (matched-end m) (string-length (source-text in)))
-                 (eq? (peek! in (matched-end m)) end-kind)))
+             (at-end? in (matched-end m)))
         (matched-value m)
-        (let ([i (max (if (matched? m) (matched-end m) 0) (source-reach in))])
-          (let-values ([(inside expected) (explain p in i)])
-            (raise-unexpected 'parse in i inside expected))))))
+        (begin
+          ; Where the match ended is as far as `in` itself got, so an inner
+          ; Source that got no further doesn't say the error, unless it's
+          ; one whose own match ended there, whose lexer was asked what
+          ; follows.
+          (when (and (matched? m) (not (ended-at in (matched-end m))))
+            (reach! in (matched-end m)))
+          (let ([i (max 0 (source-reach in))])
+            (let-values ([(inside expected) (explain p in i)])
+              (raise-unexpected 'parse in i inside expected)))))))
 
 ; Parser Source Natural -> (values (or/c Symbol #f) [Listof Label])
 ; The name of the innermost named parser that a parse of `in` with `p`
@@ -857,7 +925,8 @@
 ; (Value ... -> Value) [Listof Parser] -> Run
 ; Matches all of `ps`, in order, each from where the last one's match
 ; ended, and calls `build` with their Values. It fails if any of them
-; does.
+; does, and then the matches before it aren't part of the parse, so the
+; Source's `ended` is put back as it was.
 ;
 ; The loop at the end does this for any number of parsers, but it
 ; collects the Values in a list, then reverses it and applies `build` to
@@ -869,15 +938,18 @@
 (define (all-of build ps)
   (or (written-out-run build ps)
       (lambda (in i)
-        (let loop ([ps ps] [i i] [vs '()])
-          (if (null? ps)
-              (matched (apply build (reverse vs)) i)
-              (let ([m (run (car ps) in i)])
-                (if (symbol? m)
-                    'error
-                    (loop (cdr ps)
-                          (matched-end m)
-                          (cons (matched-value m) vs)))))))))
+        (let ([kept (ended-inner in)])
+          (let loop ([ps ps] [i i] [vs '()])
+            (if (null? ps)
+                (matched (apply build (reverse vs)) i)
+                (let ([m (run (car ps) in i)])
+                  (if (symbol? m)
+                      (begin
+                        (set-ended-inner! in kept)
+                        'error)
+                      (loop (cdr ps)
+                            (matched-end m)
+                            (cons (matched-value m) vs))))))))))
 
 ; (written-out-run build ps) : (or/c Run #f)
 ; The Run that `steps` writes out for as many parsers as `ps` has, or #f
@@ -886,9 +958,11 @@
 ; `written-out` 2 it's
 ;
 ;   (match ps
-;     [(list p1) (lambda (in i) (steps in i build () (p1)))]
-;     [(list p1 p2) (lambda (in i) (steps in i build () (p1 p2)))]
+;     [(list p1) (lambda (in i) (steps in i kept build () (p1)))]
+;     [(list p1 p2) (lambda (in i) (steps in i kept build () (p1 p2)))]
 ;     [_ #f])
+;
+; with `kept` the Source's `ended` as the Run begins.
 (define-syntax (written-out-run stx)
   (syntax-case stx ()
     [(_ build ps)
@@ -896,17 +970,21 @@
                     (for/list ([n (in-range 1 (add1 written-out))])
                       (generate-temporaries (build-list n (lambda (k) 'p))))])
        #'(match ps
-           [(list p ...) (lambda (in i) (steps in i build () (p ...)))]
+           [(list p ...)
+            (lambda (in i)
+              (let ([kept (ended-inner in)])
+                (steps in i kept build () (p ...))))]
            ...
            [_ #f]))]))
 
-; (steps in i build (v ...) (p ...)) : Match
+; (steps in i kept build (v ...) (p ...)) : Match
 ; Writes out the body of one of `all-of`'s Runs. It runs each `p` in
 ; order, the first from position `i` of `in`, and fails as soon as one
-; does. Otherwise it calls `build` with the Values `v ...` followed by
-; the Values of the `p`s, and ends where the last `p` ended. `all-of`
+; does, putting the Source's `ended` back to `kept` if a `p` before it
+; matched. Otherwise it calls `build` with the Values `v ...` followed
+; by the Values of the `p`s, and ends where the last `p` ended. `all-of`
 ; starts it with no `v`s, and each step adds one. For example,
-; (steps in i build () (a b)) expands to
+; (steps in i kept build () (a b)) expands to
 ;
 ;   (let ([m (run a in i)])
 ;     (if (symbol? m)
@@ -914,7 +992,7 @@
 ;         (let ([x (matched-value m)] [j (matched-end m)])
 ;           (let ([m (run b in j)])
 ;             (if (symbol? m)
-;                 'error
+;                 (begin (set-ended-inner! in kept) 'error)
 ;                 (let ([x2 (matched-value m)] [j2 (matched-end m)])
 ;                   (matched (build x x2) j2)))))))
 ;
@@ -924,14 +1002,22 @@
 ; written-out Runs don't have to be written by hand.
 (define-syntax steps
   (syntax-rules ()
-    [(_ in i build (v ...) ())
+    [(_ in i kept build (v ...) ())
      (matched (build v ...) i)]
-    [(_ in i build (v ...) (p rest ...))
+    [(_ in i kept build () (p rest ...))
      (let ([m (run p in i)])
        (if (symbol? m)
            'error
            (let ([x (matched-value m)] [j (matched-end m)])
-             (steps in j build (v ... x) (rest ...)))))]))
+             (steps in j kept build (x) (rest ...)))))]
+    [(_ in i kept build (v ...) (p rest ...))
+     (let ([m (run p in i)])
+       (if (symbol? m)
+           (begin
+             (set-ended-inner! in kept)
+             'error)
+           (let ([x (matched-value m)] [j (matched-end m)])
+             (steps in j kept build (v ... x) (rest ...)))))]))
 
 ; Parser ... -> Parser
 ; Tries each parser in order, from the same position, and matches what
@@ -1076,15 +1162,19 @@
 
 ; [Value -> Any] Parser -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
-; Otherwise it fails where `p` began, where the Value it rejected is.
+; Otherwise it fails where `p` began, where the Value it rejected is,
+; and `p`'s match isn't part of the parse, so the Source's `ended` is
+; put back as it was.
 (define (where ok? p)
   (check-parsers 'where p)
   (parser
    (lambda (in i)
-     (let ([m (run p in i)])
+     (let* ([kept (ended-inner in)]
+            [m (run p in i)])
        (cond [(not (matched? m)) m]
              [(ok? (matched-value m)) m]
-             [else (fail! in i)])))
+             [else (set-ended-inner! in kept)
+                   (fail! in i)])))
    (lambda () (start-of p))))
 
 ; The combinators below are made from the kernel's.

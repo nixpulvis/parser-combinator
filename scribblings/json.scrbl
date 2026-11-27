@@ -90,16 +90,14 @@ JSON is parsed in two stages. @racket[json-lexer] splits the text into
  other grammar.
 
 Whitespace belongs to the token after it. A value takes the whitespace
- before it, and leaves what follows to the surrounding grammar. At the
- end of what @racket[json-lexer] makes, the end of the text counts as a
- token, so @racket[parse] consumes the whitespace before it. That is how
- @racket[string->json] allows whitespace after a value.
+ before it, and leaves what follows to the surrounding grammar. To
+ @racket[parse], the end of the text is a token too, so whitespace can
+ follow a value that ends the text.
 
 @examples[#:eval json-eval
-(parse VALUE "  null")
+(parse VALUE "  null ")
 (parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2];")
-(eval:error (parse VALUE "null "))
-(parse VALUE (json-lexer "  null "))
+(eval:error (parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2] ;"))
 (eval:error (parse VALUE "[1 2]"))
 ]
 
