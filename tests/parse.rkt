@@ -142,7 +142,7 @@
             (if (and (< i (string-length s)) (char=? (string-ref s i) c))
                 (matched name (add1 i))
                 'error))
-          (start (list c) #f)))
+          (start (list c) #f '())))
 (define SPIED (alt (spy-for 'a #\a) (spy-for 'b #\b) (spy-for 'c #\c)))
 (check-equal? (list (SPIED "c") (SPIED "b") (SPIED "x") tried)
               (list (result 'c "") (result 'b "") 'error '(b c)))
@@ -486,28 +486,53 @@
 ; parse tests
 (check-equal? (parse (emp) "") '())
 ; A failed parse says what it found where it got furthest, by line and
-; column: where a parser failed, or where the match ended.
-(check-exn (message-is "parse: unexpected text \"b\" at line 1, column 1")
+; column: where a parser failed, or where the match ended, and what was
+; expected there.
+(check-exn (message-is "parse: unexpected text \"b\" at line 1, column 1\n"
+                       "  expected: \"a\"")
            (λ () (parse (lit "a") "b")))
-(check-exn (message-is "parse: unexpected text \"{}\" at line 1, column 1")
+(check-exn (message-is "parse: unexpected text \"{}\" at line 1, column 1\n"
+                       "  expected: end of input")
            (λ () (parse (emp) "{}")))
-(check-exn (message-is "parse: unexpected text \"gh\" at line 1, column 3")
+(check-exn (message-is "parse: unexpected text \"gh\" at line 1, column 3\n"
+                       "  expected: end of input")
            (λ () (parse (lit "hi") "high")))
-(check-exn (message-is "parse: unexpected text \"p\" at line 1, column 4")
+(check-exn (message-is "parse: unexpected text \"p\" at line 1, column 4\n"
+                       "  expected: \"hello\"")
            (λ () (parse (lit "hello") "help")))
-; where fails where its parser began, where the Value it rejects is.
+; where fails where its parser began, where the Value it rejects is, and
+; says nothing it expected.
 (check-exn (message-is "parse: unexpected text \"300\" at line 1, column 3")
            (λ () (parse (seq (lit "x=") (where byte? (pmap string->number (rx #px"\\d+"))))
                         "x=300")))
-(check-exn (message-is "parse: unexpected end of input at line 1, column 2")
+(check-exn (message-is "parse: unexpected end of input at line 1, column 2\n"
+                       "  expected: \"ab\"")
            (λ () (parse (lit "ab") "a")))
-(check-exn (message-is "parse: unexpected text \"d\" at line 1, column 3")
+(check-exn (message-is "parse: unexpected text \"d\" at line 1, column 3\n"
+                       "  expected: \"bc\"")
            (λ () (parse (seq (lit "a") (opt (lit "bc"))) "abd")))
-(check-exn (message-is "parse: unexpected text \"c\" at line 2, column 1")
+(check-exn (message-is "parse: unexpected text \"c\" at line 2, column 1\n"
+                       "  expected: \"b\"")
            (λ () (parse (seq (lit "a\n") (lit "b")) "a\nc")))
-(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2")
+; alt says what the alternatives it skipped would have begun with.
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2\n"
+                       "  expected: \"b\" or \"c\"")
            (λ () (parse (seq (lit "a") (alt (lit "b") (lit "c"))) "ax")))
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2\n"
+                       "  expected: \"0\", \"1\" or end of input")
+           (λ () (parse (seq (lit "a") (opt (span "01"))) "ax")))
 (define-parser NESTED
   (star (unwrap (lit "(") NESTED (lit ")"))))
-(check-exn (message-is "parse: unexpected end of input at line 1, column 4")
+(check-exn (message-is "parse: unexpected end of input at line 1, column 4\n"
+                       "  expected: \"(\" or \")\"\n"
+                       "  in: NESTED")
            (λ () (parse NESTED "(()")))
+; A named parser that would have begun there is what was expected, rather
+; than what's in it, and one made with `parser` and a name is named too.
+(define-parser DIGIT (alt (lit "0") (lit "1")))
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2\n"
+                       "  expected: DIGIT")
+           (λ () (parse (seq (lit "a") DIGIT) "ax")))
+(check-exn (message-is "parse: unexpected text \"b\" at line 1, column 2\n"
+                       "  expected: NEVER")
+           (λ () (parse (seq (lit "a") (positions:parser (lambda (in i) 'error) 'NEVER)) "ab")))

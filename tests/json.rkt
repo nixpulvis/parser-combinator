@@ -207,8 +207,38 @@
 (check-exn #rx"unexpected number at line 1, column 4" (λ () (string->json "[1 2]")))
 (check-exn #rx"unexpected end-array at line 1, column 4" (λ () (string->json "[1,]")))
 (check-exn #rx"unexpected end of input at line 1, column 3" (λ () (string->json "[1")))
-(check-exn #rx"unexpected begin-object at line 1, column 4" (λ () (string->json "{} {}")))
-(check-exn #rx"unexpected text \"nul\" at line 1, column 1" (λ () (string->json "nul")))
+(check-exn #rx"^parse: unexpected begin-object at line 1, column 4\n  expected: end of input$"
+           (λ () (string->json "{} {}")))
+; Where no token begins, the error is where the lexer's rules that could
+; begin there got furthest, and says which kind of token it was lexing,
+; and nothing of the grammar, which has no part in what a token is.
+(check-exn #rx"^parse: unexpected end of input at line 1, column 4\n  lexing: null$"
+           (λ () (string->json "nul")))
+(check-exn #rx"unexpected text \"xcd\\\\\"]\" at line 1, column 6\n  lexing: string$"
+           (λ () (string->json "[\"ab\\xcd\"]")))
+(check-exn #rx"unexpected text \"G4\\\\\"]\" at line 1, column 13\n  lexing: string$"
+           (λ () (string->json "[1, \"caf\\u12G4\"]")))
+(check-exn #rx"unexpected end of input at line 1, column 16\n  lexing: string$"
+           (λ () (string->json "[\"unterminated]")))
+; Lookahead past a token that was lexed doesn't count: the 2 is a number,
+; and no token begins with the dot.
+(check-exn #rx"unexpected text \".e5]\" at line 1, column 6\n  expected: comma or end-array\n  in: JSON-ARRAY$"
+           (λ () (string->json "[1, 2.e5]")))
+(check-exn #rx"unexpected number at line 1, column 4\n  expected: comma or end-array\n  in: JSON-ARRAY$"
+           (λ () (string->json "[1 2.]")))
+; It says what was expected there: a token's kind, or a named parser
+; that would have begun there, rather than what's in it, and names the
+; innermost named parser that the parse got there inside.
+(check-exn #rx"unexpected end of input at line 1, column 2\n  expected: JSON-VALUE or end-array\n  in: JSON-ARRAY$"
+           (λ () (string->json "[")))
+(check-exn #rx"unexpected number at line 1, column 6\n  expected: colon\n  in: JSON-PAIR$"
+           (λ () (string->json "{\"a\" 1}")))
+(check-exn #rx"unexpected text \"}\" at line 1, column 10\n  lexing: null$"
+           (λ () (string->json "{\"a\": nul}")))
+(check-exn #rx"unexpected begin-object at line 1, column 17\n  expected: JSON-PAIR\n  in: JSON-OBJECT$"
+           (λ () (string->json "{\"a\": {\"b\": 1}, {\"c\": 1}}")))
+(check-exn #rx"^tokens: unexpected text \"x\\\\\"\" at line 1, column 5\n  lexing: string$"
+           (λ () (tokens json-lexer "\"ab\\x\"")))
 (for ([text (in-list (list "" " " "[" "]" "[1,]" "[,1]" "[1 2]" "{\"a\"}" "{\"a\":}"
                            "{1:2}" "{\"a\":1,}" "nul" "tru" "01" "1." "1e" "[1.]"
                            "\"unterminated" "\"\\x\"" "[1]]" "{} {}" "@"))])

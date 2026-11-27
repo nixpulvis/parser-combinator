@@ -2,10 +2,11 @@
 (require (only-in "parse.rkt" [skip skip-chars])
          (only-in (submod "parse.rkt" private)
                   [parser parser-with-start] token struct:token token? token-kind token-value
-                  token-start token-end source-text source-match source-scanner make-source
+                  token-start token-end source-text source-match source-scanner source-reach
+                  source-explaining set-source-explaining! make-source no-lexer reach!
                   kept-value kept-start kept-end keep-inner! peek! peek-id! run parser?
-                  parser-run matched matched-end start start-of start-chars kind-id end-kind
-                  raise-unexpected))
+                  parser-run matched matched-end start start-of start-chars kind-id kind-name fail!
+                  end-kind raise-unexpected))
 
 (provide lexer
          (rename-out [scanning-lexer? lexer?])
@@ -106,23 +107,41 @@
          [others (for*/hasheqv ([st (in-list sts)] #:when st
                                 [c (in-list (start-chars st))]
                                 #:when (>= (char->integer c) 128))
-                   (values c (for-char c)))])
-    (lambda (in i)
-      (let ([s (source-text in)])
-        (let next ([i i])
-          (if (= i (string-length s))
-              (values end i 'error)
-              (let ([c (string-ref s i)])
-                (let loop ([rs (if (< (char->integer c) 128)
-                                   (vector-ref ascii (char->integer c))
-                                   (hash-ref others c (lambda () otherwise)))])
-                  (if (null? rs)
-                      (values #f i 'error)
-                      (let ([m ((cdar rs) in i)])
-                        (cond [(or (symbol? m) (= (matched-end m) i))
-                               (loop (cdr rs))]
-                              [(caar rs) (values (caar rs) i m)]
-                              [else (next (matched-end m))])))))))))))
+                   (values c (for-char c)))]
+         ; Char -> [Listof (cons (or/c Natural #f) Run)]
+         [rules-for (lambda (c)
+                      (if (< (char->integer c) 128)
+                          (vector-ref ascii (char->integer c))
+                          (hash-ref others c (lambda () otherwise))))])
+    (case-lambda
+      [(in i)
+       (let ([s (source-text in)])
+         (let next ([i i])
+           (if (= i (string-length s))
+               (values end i 'error)
+               (let loop ([rs (rules-for (string-ref s i))])
+                 (if (null? rs)
+                     (values #f i 'error)
+                     (let ([m ((cdar rs) in i)])
+                       (cond [(or (symbol? m) (= (matched-end m) i))
+                              (loop (cdr rs))]
+                             [(caar rs) (values (caar rs) i m)]
+                             [else (next (matched-end m))])))))))]
+      ; Source Natural #t -> (values (or/c Symbol #f) Natural)
+      ; Where no Token begins at `i`, tries each rule that could begin
+      ; there again, each on a Source of its own, and produces the kind of
+      ; the one that got furthest, and where it got to, or #f and `i` if
+      ; none got past `i`. It's only for an error message.
+      [(in i explain)
+       (let ([s (source-text in)])
+         (for/fold ([kind #f] [at i])
+                   ([r (in-list (rules-for (string-ref s i)))] #:when (car r))
+           (let ([own (make-source s no-lexer)])
+             (reach! own i)
+             ((cdr r) own i)
+             (if (> (source-reach own) at)
+                 (values (kind-name (car r)) (source-reach own))
+                 (values kind at)))))])))
 
 ; Symbol -> Parser
 ; Symbol Any -> Parser
@@ -133,23 +152,25 @@
 (define tok
   (case-lambda
     [(kind)
-     (let ([id (kind-id kind)])
+     (let ([id (kind-id kind)]
+           [labels (list kind)])
        (parser-with-start
         (lambda (in i)
           (if (eq? (peek-id! in i) id)
               (source-match in)
-              'error))
-        (start (list kind) #f)
+              (fail! in i labels)))
+        (start (list kind) #f labels)
         kind))]
     [(kind value)
-     (let ([id (kind-id kind)])
+     (let ([id (kind-id kind)]
+           [labels (list kind)])
        (parser-with-start
         (lambda (in i)
           (if (and (eq? (peek-id! in i) id)
                    (equal? (kept-value in) value))
               (matched value (kept-end in))
-              'error))
-        (start (list kind) #f)
+              (fail! in i labels)))
+        (start (list kind) #f labels)
         kind))]))
 
 ; Lexer Parser -> Parser
@@ -164,8 +185,9 @@
 ;
 ; Given a Source of `lex`'s own, `p` runs over it as it is. Otherwise
 ; `p` runs over a Source of `lex`'s, which is kept, so where the parse
-; got furthest inside it is said in its Tokens. Nothing is known about
-; what `p` begins with in characters, so `alt` always tries it.
+; got furthest inside it is said in its Tokens, and which explains its
+; part of a failed parse as `in` does. Nothing is known about what `p`
+; begins with in characters, so `alt` always tries it.
 (define (with-lexer lex p)
   (unless (scanning-lexer? lex)
     (raise-argument-error 'with-lexer "lexer?" lex))
@@ -176,10 +198,11 @@
      (lambda (in i)
        (if (eq? (source-scanner in) scanner)
            (run p in i)
-           (let* ([inner (make-source (source-text in) scanner)]
-                  [m (run p inner i)])
-             (keep-inner! in inner)
-             m)))
+           (let ([inner (make-source (source-text in) scanner)])
+             (set-source-explaining! inner (source-explaining in))
+             (let ([m (run p inner i)])
+               (keep-inner! in inner)
+               m))))
      #f)))
 
 ; Lexer String -> [Listof Token]

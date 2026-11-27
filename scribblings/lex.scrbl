@@ -112,10 +112,12 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
 @defproc[(tokens [lex lexer?] [str string?]) (listof token?)]{
  produces the tokens that @racket[lex] finds in @racket[str], to show
  what a grammar over them sees. Where no rule matches, it raises
- @racket[exn:fail], saying what's there, as @racket[parse] would.
+ @racket[exn:fail] with the message @racket[parse] would give,
+ including what it was lexing.
 
 @examples[#:eval lex-eval
 (tokens sums "1 + 2")
+(eval:error (tokens sums "1 + 2x"))
 ]}
 
 @defstruct*[token ([kind symbol?]

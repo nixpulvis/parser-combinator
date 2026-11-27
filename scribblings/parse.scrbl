@@ -22,14 +22,35 @@
  resulting @|Value|.
  Unlike applying @racket[p] directly, @racket[parse] demands that
  @racket[p] consume all of @racket[in]. It raises @racket[exn:fail] if
- @racket[p] fails or leaves text over, saying what it found where the
- parse got furthest, by line and column: the furthest that any parser
- failed at, or that @racket[p]'s match ended at.
+ @racket[p] fails or leaves text over. The error gives the line and
+ column where the parse got furthest: the furthest position any parser
+ failed at, or where @racket[p]'s match ended. It may add these fields,
+ one per line:
+@itemlist[
+ @item{@tt{lexing:} when no token could be read there, the kind of
+ token whose rule got furthest. The error points to where that rule
+ stopped, and no other fields are shown, since the grammar plays no
+ part in reading a token.}
+ @item{@tt{expected:} what would have matched there: the text of a
+ @racket[lit], a character of a @racket[span] given a string, the kind
+ of a @racket[tok], the end of input, or the name of a named parser
+ that could start there. Parsers given a predicate or a @Run,
+ @racket[rx], and @racket[where] don't say what they expect.}
+ @item{@tt{in:} the innermost parser named with @racket[define-parser],
+ or by @racket[parser] with a name, that started before that point and
+ was still running there.}
+]
+
+ To fill in these fields, @racket[parse] runs @racket[p] a second time,
+ so the functions given to @racket[pmap] run twice when a parse fails.
 
 @examples[#:eval parse-eval
 (parse (lit "hi") "hi")
 (eval:error (parse (lit "hi") "bye"))
 (eval:error (parse (lit "hi") "high"))
+(define-parser GREETING
+  (seq (lit "hi ") (alt (lit "you") (lit "all"))))
+(eval:error (parse GREETING "hi yall"))
 ]}
 
 @; -----------------------------------------------------------------------------
@@ -125,7 +146,8 @@ Parsers pass positions to one another instead of copying the input.
  parser runs.
 
  The parser's @racket[object-name] is @racket[id], so it prints with
- that name.
+ that name, and @racket[parse]'s error names it when the parse fails
+ inside it.
 
 @examples[#:eval parse-eval
 (code:comment "Parser")
@@ -456,6 +478,11 @@ A @Run is given an @Input and a position in its text, and matches from
  it. If all its matches begin with the same text, match that text with
  a @racket[lit] first, and write the @Run for the rest.
 
+@deftech{Run} : @racket[(-> input? exact-nonnegative-integer? (or/c 'error matched?))]
+
+A @Run matches its input's text starting at the given position, and
+ produces a @|Match|.
+
 @deftech{Match} : @racket[(or/c 'error matched?)]
 
 A @Match is one of:
@@ -465,11 +492,6 @@ A @Match is one of:
  producing @racket[_value], and the match ended just before position
  @racket[_end] of the input's text}
 ]
-
-@deftech{Run} : @racket[(-> input? exact-nonnegative-integer? (or/c 'error matched?))]
-
-A @Run matches its input's text starting at the given position, and
- produces a @|Match|.
 
 @defstruct*[matched ([value #,Value] [end exact-nonnegative-integer?]) #:transparent]{
  represents a successful match, as produced by a @Run that matches. See
@@ -482,8 +504,8 @@ A @Run matches its input's text starting at the given position, and
  makes a @Parser from a @|Run|. Applying it to a string calls its
  @Run from position @racket[0], and turns the @Match into a @|Result|,
  copying the rest of the input once, for its @racket[_remaining]. The
- combinators in @racketmodname[parser-combinator/parse] call its @Run
- directly, with positions, so used inside a grammar it never copies.
+ combinators call its @Run directly, with positions, so used inside a
+ grammar it never copies.
 
 @examples[#:eval positions-eval
 (code:comment "Char-Predicate -> Parser")
@@ -500,9 +522,11 @@ A @Run matches its input's text starting at the given position, and
 ((char-where char-numeric?) "7up")
 ]
 
- The value of @racket[name-expr] is the parser's @racket[object-name],
- so the parser prints with that name. Without a name, or with
- @racket[#f], it prints as @racketresultfont{#<procedure>}.
+ The value of @racket[name-expr] becomes the parser's
+ @racket[object-name]. The parser prints with that name, and
+ @racket[parse]'s errors name it, as for @racket[define-parser].
+ Without a name, or with @racket[#f], it prints as
+ @racketresultfont{#<procedure>}.
 
 @examples[#:eval positions-eval
 (parser (lambda (in i) 'error) 'NEVER)
@@ -521,31 +545,6 @@ A @Run matches its input's text starting at the given position, and
 @defproc[(input-text [in input?]) string?]{
  produces the text of @racket[in], which a @Run matches from the
  position it's given. It returns the text itself, without copying it.}
-
-@defproc[(fail [in input?] [i exact-nonnegative-integer?]) 'error]{
- produces @racket['error] for a @Run to fail with, and records that the
- parse got to position @racket[i] of @racket[in]. If the parse fails
- and gets no further, @racket[parse]'s error points there, as it does
- for the library's own parsers. This lets a @Run point at the bad
- character instead of where it started.
-
-@examples[#:eval positions-eval
-(code:comment "Parser")
-(code:comment "matches two digits")
-(define TWO-DIGITS
-  (parser
-   (lambda (in i)
-     (define s (input-text in))
-     (let loop ([j i])
-       (cond [(= j (+ i 2))
-              (matched (substring s i j) j)]
-             [(and (< j (string-length s))
-                   (char-numeric? (string-ref s j)))
-              (loop (add1 j))]
-             [else (fail in j)])))))
-(parse TWO-DIGITS "42")
-(eval:error (parse TWO-DIGITS "4x"))
-]}
 
 @defproc[(run [p #,Parser] [in #,Input] [i exact-nonnegative-integer?])
          (or/c 'error matched?)]{
@@ -576,4 +575,29 @@ A @Run matches its input's text starting at the given position, and
 (run (counted (lit "ab")) "x2ababab" 1)
 (parse (counted (lit "ab")) "3ababab")
 (eval:error (parse (counted (lit "ab")) "2ababab"))
+]}
+
+@defproc[(fail [in input?] [i exact-nonnegative-integer?]) 'error]{
+ produces @racket['error] for a @Run to fail with, and records that the
+ parse got to position @racket[i] of @racket[in]. If the parse fails
+ and gets no further, @racket[parse]'s error points there, as it does
+ for the library's own parsers. This lets a @Run point at the bad
+ character instead of where it started.
+
+@examples[#:eval positions-eval
+(code:comment "Parser")
+(code:comment "matches two digits")
+(define TWO-DIGITS
+  (parser
+   (lambda (in i)
+     (define s (input-text in))
+     (let loop ([j i])
+       (cond [(= j (+ i 2))
+              (matched (substring s i j) j)]
+             [(and (< j (string-length s))
+                   (char-numeric? (string-ref s j)))
+              (loop (add1 j))]
+             [else (fail in j)])))))
+(parse TWO-DIGITS "42")
+(eval:error (parse TWO-DIGITS "4x"))
 ]}
