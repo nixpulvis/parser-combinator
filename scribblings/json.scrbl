@@ -4,11 +4,14 @@
           (for-label racket/base
                      racket/contract/base
                      parser-combinator/parse
-                     parser-combinator/json))
+                     parser-combinator/json
+                     (submod parser-combinator/json tokens)
+                     (only-in parser-combinator/lex with-lexer lexer? tok)))
 
 @(define Value @tech{Value})
 @(define JSON @tech{JSON})
 @(define Parser @tech{Parser})
+@(define Lexer @tech{Lexer})
 @(define json-site @link["https://www.json.org"]{JSON web site})
 
 @title[#:tag "json"]{JSON}
@@ -17,7 +20,8 @@
 
 This library parses text in the JSON data exchange format into Racket
  values. See the @|json-site| for more about JSON. The library is written
- entirely with @racketmodname[parser-combinator/parse].
+ entirely with @racketmodname[parser-combinator/parse] and
+ @racketmodname[parser-combinator/lex].
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-values"]{JSON Values}
@@ -52,8 +56,9 @@ An empty JSON array is @racket['()] and an empty JSON object is
 
 @defproc[(string->json [str string?]) #,JSON]{
  parses @racket[str] as a JSON value, ignoring whitespace around it. It
- raises @racket[exn:fail] if @racket[str] is not valid JSON. It is the
- same as @racket[(parse VALUE str)].
+ raises @racket[exn:fail] if @racket[str] is not valid JSON, saying what
+ it found where it stopped. It is the same as
+ @racket[(parse VALUE (json-lexer str))].
 
 @examples[#:eval json-eval
 (string->json "[]")
@@ -74,27 +79,49 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-grammar"]{Grammar}
 
-The grammar behind @racket[string->json] is made of the parsers below:
- @racket[NUMBER], @racket[STRING], @racket[ARRAY], and @racket[OBJECT]
- for those kinds of value, @racket[PAIR] for one name and value in an
- object, and @racket[VALUE] for any JSON value. They're exported so that
- programs can use them directly.
+JSON is parsed in two stages. @racket[json-lexer] splits the text into
+ tokens, such as numbers, strings, and commas, and drops the whitespace
+ between them. A grammar over those tokens then parses them. The
+ parsers below are that grammar, each wrapped in @racket[json-lexer]
+ as with @racket[with-lexer]: @racket[ARRAY] and @racket[OBJECT] for
+ those kinds of value, @racket[PAIR] for one name and value in an
+ object, and @racket[VALUE] for any JSON value. They parse either a
+ string or what @racket[json-lexer] makes, and they work inside any
+ other grammar.
 
-JSON allows whitespace around every value and punctuation mark.
- @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and @racket[PAIR] skip
- that whitespace, inside themselves and around themselves.
- @racket[NUMBER] and @racket[STRING] match only their own text.
- Whitespace is any of @racket[#\space], @racket[#\tab],
- @racket[#\newline], and @racket[#\return].
-
-@defthing[VALUE #,Parser]{
- matches any JSON value along with the whitespace around it. It
- produces @racket[(quote null)], @racket[#t], or @racket[#f] for
- @tt{null}, @tt{true}, and @tt{false}, or what @racket[NUMBER],
- @racket[STRING], @racket[ARRAY], or @racket[OBJECT] produces.
+Whitespace belongs to the token after it. A value takes the whitespace
+ before it, and leaves what follows to the surrounding grammar. To
+ @racket[parse], the end of the text is a token too, so whitespace can
+ follow a value that ends the text.
 
 @examples[#:eval json-eval
 (parse VALUE "  null ")
+(parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2];")
+(eval:error (parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2] ;"))
+(eval:error (parse VALUE "[1 2]"))
+]
+
+@racket[NUMBER] and @racket[STRING] are the lexer's rules for numbers
+ and strings. They parse characters, not tokens, and match only their
+ own text.
+
+@defthing[json-lexer #,Lexer]{
+ produces an @tech{Input} from a string, using JSON's lexer. It reads
+ tokens as a parser asks for them, skipping any whitespace before each:
+ @racket[#\space], @racket[#\tab], @racket[#\newline], and
+ @racket[#\return].
+
+@examples[#:eval json-eval
+(parse VALUE (json-lexer "  null "))
+]}
+
+@defthing[VALUE #,Parser]{
+ matches any JSON value. It produces @racket[(quote null)], @racket[#t],
+ or @racket[#f] for @tt{null}, @tt{true}, and @tt{false}, or what
+ @racket[NUMBER], @racket[STRING], @racket[ARRAY], or @racket[OBJECT]
+ produces.
+
+@examples[#:eval json-eval
 (parse VALUE "[1, true]")
 ]}
 
@@ -147,8 +174,8 @@ JSON allows whitespace around every value and punctuation mark.
 
 @defthing[ARRAY #,Parser]{
  matches a JSON array, that is, zero or more @racket[VALUE]s separated by
- commas and surrounded by brackets, along with the whitespace around it.
- It produces the list of values, in order.
+ commas and surrounded by brackets. It produces the list of values, in
+ order.
 
 @examples[#:eval json-eval
 (parse ARRAY "[true, false]")
@@ -156,9 +183,8 @@ JSON allows whitespace around every value and punctuation mark.
 
 @defthing[OBJECT #,Parser]{
  matches a JSON object, that is, zero or more @racket[PAIR]s separated by
- commas and surrounded by braces, along with the whitespace around it. It
- produces an immutable @racket[hasheq] from the name of each
- @racket[PAIR] to its value.
+ commas and surrounded by braces. It produces an immutable
+ @racket[hasheq] from the name of each @racket[PAIR] to its value.
 
 @examples[#:eval json-eval
 (parse OBJECT "{}")
@@ -168,11 +194,37 @@ JSON allows whitespace around every value and punctuation mark.
 
 @defthing[PAIR #,Parser]{
  matches one name and value in a JSON object, such as
- @tt{"name": true}, along with the whitespace around it. It produces a
- pair of the name, as a symbol, and the value, as produced by
- @racket[VALUE].
+ @tt{"name": true}. It produces a pair of the name, as a symbol, and the
+ value, as produced by @racket[VALUE].
 
 @examples[#:eval json-eval
 (code:comment "\"a\": true")
 (parse PAIR "\"a\": true")
 ]}
+
+@; -----------------------------------------------------------------------------
+@section[#:tag "json-tokens"]{Grammar over Tokens}
+
+@defmodule[(submod parser-combinator/json tokens) #:packages ("parser-combinator")]
+
+These parsers are JSON's grammar over tokens: they match the tokens
+ that @racket[json-lexer] makes, such as @racket['begin-array] and
+ @racket['number], with @racket[tok], rather than characters, so they
+ never see whitespace. They need an @tech{Input} made by
+ @racket[json-lexer], or by another lexer that makes the same kinds of
+ token. @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and
+ @racket[PAIR] are each one of them with @racket[json-lexer] around it,
+ by @racket[with-lexer], e.g. @racket[VALUE] is
+ @racket[(with-lexer json-lexer JSON-VALUE)].
+
+@defthing[JSON-VALUE #,Parser]{
+ matches what @racket[VALUE] does, over tokens.}
+
+@defthing[JSON-ARRAY #,Parser]{
+ matches what @racket[ARRAY] does, over tokens.}
+
+@defthing[JSON-OBJECT #,Parser]{
+ matches what @racket[OBJECT] does, over tokens.}
+
+@defthing[JSON-PAIR #,Parser]{
+ matches what @racket[PAIR] does, over tokens.}

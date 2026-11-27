@@ -1,6 +1,7 @@
 # parser-combinator
 
-Simple Racket parser library, and default (tested) JSON implementation.
+Simple Racket parser library, with lexers, and default (tested) JSON
+implementation.
 
 Read the [documentation](https://nixpulvis.com/parser-combinator/).
 
@@ -28,6 +29,31 @@ raco pkg install parser-combinator
 The [Quick Start](https://nixpulvis.com/parser-combinator/quick.html) has a
 longer example. Otherwise, you can read the JSON parser's implementation as
 well.
+
+## Lexer Usage
+
+```racket
+#lang racket
+(require parser-combinator/parse parser-combinator/lex)
+
+(define sum-lexer
+  (lexer #:skip " "
+         ['integer (pmap string->number (rx #px"\\d+"))]
+         ['plus (lit "+")]))
+
+(define-parser SUM
+  (with-lexer sum-lexer
+    (pmap (lambda (ns) (apply + ns))
+          (sep-by+ (tok 'integer) (tok 'plus)))))
+
+(parse SUM "1 + 2 + 3")
+;=> 6
+(tokens sum-lexer "1 + 2")
+;=> (list (token 'integer 1 0 1) (token 'plus "+" 2 3) (token 'integer 2 4 5))
+```
+
+The lexer skips the spaces between tokens, so the grammar over them never
+mentions them, and `with-lexer` puts the two together into a parser of text.
 
 ## JSON Usage
 

@@ -3,7 +3,9 @@
 (require racket/runtime-path)
 (require (only-in json string->jsexpr))
 (require "../parse.rkt")
+(require (only-in "../lex.rkt" tokens))
 (require "../json.rkt")
+(require (submod "../json.rkt" tokens))
 (require (submod "../parse.rkt" private))
 
 ; STRING tests
@@ -44,6 +46,11 @@
               'error)
 (check-equal? (STRING "\"\\u12")
               'error)
+; It fails at the first character that isn't a hexadecimal digit.
+(check-exn #rx"unexpected text \"G4\\\\\"\" at line 1, column 6"
+           (λ () (parse STRING "\"\\u12G4\"")))
+(check-exn #rx"unexpected end of input at line 1, column 6"
+           (λ () (parse STRING "\"\\u12")))
 (check-exn exn:fail? (λ () (parse STRING "\"tab\there\"")))
 (check-exn exn:fail? (λ () (parse STRING "\"nul\u0000\"")))
 (check-exn exn:fail? (λ () (parse STRING "\"us\u001F\"")))
@@ -91,90 +98,182 @@
 (check-exn exn:fail? (λ () (string->json "1e")))
 (check-exn exn:fail? (λ () (string->json "[1.]")))
 
+; json-lexer tests
+(check-equal? (tokens json-lexer "") '())
+(check-equal? (tokens json-lexer " \n\t ") '())
+(check-equal? (tokens json-lexer "[1, \"a\"]")
+              (list (token 'begin-array "[" 0 1)
+                    (token 'number 1 1 2)
+                    (token 'value-separator "," 2 3)
+                    (token 'string "a" 4 7)
+                    (token 'end-array "]" 7 8)))
+(check-equal? (tokens json-lexer " {\"k\":null}\n")
+              (list (token 'begin-object "{" 1 2)
+                    (token 'string "k" 2 5)
+                    (token 'name-separator ":" 5 6)
+                    (token 'null 'null 6 10)
+                    (token 'end-object "}" 10 11)))
+(check-exn #rx"tokens: unexpected text \"@]\" at line 2, column 4"
+           (λ () (tokens json-lexer "[1,\n 2 @]")))
+
 ; PAIR tests
-(check-equal? (parse PAIR "\"\":\"\"")
+(check-equal? (parse PAIR (json-lexer "\"\":\"\""))
               (cons '|| ""))
-(check-equal? (parse PAIR "\"foo\":\"bar\"")
+(check-equal? (parse PAIR (json-lexer "\"foo\":\"bar\""))
               (cons 'foo "bar"))
-(check-equal? (parse PAIR "\"foo\":123")
+(check-equal? (parse PAIR (json-lexer "\"foo\":123"))
               (cons 'foo 123))
-(check-equal? (parse PAIR "\"foo\" : 123")
+(check-equal? (parse PAIR (json-lexer "\"foo\" : 123"))
               (cons 'foo 123))
-(check-equal? (parse PAIR "\"foo\" \t: 123")
+(check-equal? (parse PAIR (json-lexer "\"foo\" \t: 123"))
               (cons 'foo 123))
-(check-equal? (parse PAIR " \"foo\" : 123 ")
+(check-equal? (parse PAIR (json-lexer " \"foo\" : 123 "))
               (cons 'foo 123))
 
 ; ARRAY tests
-(check-equal? (parse ARRAY "[]")
+(check-equal? (parse ARRAY (json-lexer "[]"))
               empty)
-(check-equal? (parse ARRAY "[ ]")
+(check-equal? (parse ARRAY (json-lexer "[ ]"))
               empty)
-(check-equal? (parse ARRAY "[\"\"]")
+(check-equal? (parse ARRAY (json-lexer "[\"\"]"))
               (list ""))
-(check-equal? (parse ARRAY "[\"\",123,\"hi\"]")
+(check-equal? (parse ARRAY (json-lexer "[\"\",123,\"hi\"]"))
               (list "" 123 "hi"))
-(check-equal? (parse ARRAY "[1,2,3,4,5,6,7,8,9,10]")
+(check-equal? (parse ARRAY (json-lexer "[1,2,3,4,5,6,7,8,9,10]"))
               (list 1 2 3 4 5 6 7 8 9 10))
-(check-equal? (parse ARRAY "[\"\",123,[]]")
+(check-equal? (parse ARRAY (json-lexer "[\"\",123,[]]"))
               (list "" 123 empty))
-(check-equal? (parse ARRAY "[\"\",123,[4,5,6]]")
+(check-equal? (parse ARRAY (json-lexer "[\"\",123,[4,5,6]]"))
               (list "" 123 (list 4 5 6)))
-(check-equal? (parse ARRAY " [\"\", 123, [4, 5, 6]]")
+(check-equal? (parse ARRAY (json-lexer " [\"\", 123, [4, 5, 6]]"))
               (list "" 123 (list 4 5 6)))
-(check-exn exn:fail? (λ () (parse ARRAY "[1,]")))
-(check-exn exn:fail? (λ () (parse ARRAY "[,1]")))
+(check-exn exn:fail? (λ () (parse ARRAY (json-lexer "[1,]"))))
+(check-exn exn:fail? (λ () (parse ARRAY (json-lexer "[,1]"))))
 
 ; OBJECT tests
-(check-equal? (parse OBJECT "{}")
+(check-equal? (parse OBJECT (json-lexer "{}"))
               (hasheq))
-(check-equal? (parse OBJECT " { \n } ")
+(check-equal? (parse OBJECT (json-lexer " { \n } "))
               (hasheq))
-(check-equal? (parse OBJECT "{\"foo\":\"bar\"}")
+(check-equal? (parse OBJECT (json-lexer "{\"foo\":\"bar\"}"))
               (hasheq 'foo "bar"))
-(check-equal? (parse OBJECT "{\"a\":\"b\",\"c\":\"d\"}")
+(check-equal? (parse OBJECT (json-lexer "{\"a\":\"b\",\"c\":\"d\"}"))
               (hasheq 'a "b" 'c "d"))
-(check-equal? (parse OBJECT "{\"a\":{\"b\":\"c\"}}")
+(check-equal? (parse OBJECT (json-lexer "{\"a\":{\"b\":\"c\"}}"))
               (hasheq 'a (hasheq 'b "c")))
-(check-equal? (parse OBJECT "{\"a\":1,\"b\":[],\"c\":{}}")
+(check-equal? (parse OBJECT (json-lexer "{\"a\":1,\"b\":[],\"c\":{}}"))
               (hasheq 'a 1 'b empty 'c (hasheq)))
-(check-equal? (parse OBJECT "{\"a\" : 1, \"b\" : [], \"c\" : {}}")
+(check-equal? (parse OBJECT (json-lexer "{\"a\" : 1, \"b\" : [], \"c\" : {}}"))
               (hasheq 'a 1 'b empty 'c (hasheq)))
-(check-equal? (parse OBJECT "{\"a\":1,\"b\":2,\"a\":3}")
+(check-equal? (parse OBJECT (json-lexer "{\"a\":1,\"b\":2,\"a\":3}"))
               (hasheq 'a 3 'b 2))
-(check-exn exn:fail? (λ () (parse OBJECT "{\"a\":1,}")))
+(check-exn exn:fail? (λ () (parse OBJECT (json-lexer "{\"a\":1,}"))))
 
 ; VALUE tests
-(check-equal? (parse VALUE "1")
+(check-equal? (parse VALUE (json-lexer "1"))
               1)
-(check-equal? (parse VALUE "\"Hello World\"")
+(check-equal? (parse VALUE (json-lexer "\"Hello World\""))
               "Hello World")
-(check-equal? (parse VALUE "true")
+(check-equal? (parse VALUE (json-lexer "true"))
               true)
-(check-equal? (parse VALUE "false")
+(check-equal? (parse VALUE (json-lexer "false"))
               false)
-(check-equal? (parse VALUE "null")
+(check-equal? (parse VALUE (json-lexer "null"))
               'null)
-(check-equal? (parse VALUE " \n null\t")
+(check-equal? (parse VALUE (json-lexer " \n null\t"))
               'null)
-(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
+(check-equal? (parse VALUE (json-lexer " \t[ 1 ,\n2 ]\r\n"))
               (list 1 2))
+; Each of them takes a string too, lexing it with json-lexer itself. The
+; whitespace before the value belongs to its first Token, and to parse,
+; the end of the text is a Token too, so whitespace can come before it.
+(check-equal? (parse VALUE " \t[ 1 ,\n2 ]")
+              (list 1 2))
+(check-equal? (parse ARRAY " [1, 2]")
+              (list 1 2))
+(check-equal? (parse OBJECT "{\"a\": 1}")
+              (hasheq 'a 1))
+(check-equal? (parse PAIR "\"a\" : true")
+              (cons 'a #t))
+(check-equal? (parse VALUE "[1] \n")
+              (list 1))
+(check-exn #rx"unexpected value-separator at line 1, column 4"
+           (λ () (parse ARRAY "[1,,2]")))
+
+; Error tests
+; A failed parse says what it found where it stopped.
+(check-exn #rx"unexpected text \"@]\" at line 2, column 4"
+           (λ () (string->json "[1,\n 2 @]")))
+(check-exn #rx"unexpected number at line 1, column 4" (λ () (string->json "[1 2]")))
+(check-exn #rx"unexpected end-array at line 1, column 4" (λ () (string->json "[1,]")))
+(check-exn #rx"unexpected end of input at line 1, column 3" (λ () (string->json "[1")))
+(check-exn #rx"^parse: unexpected begin-object at line 1, column 4\n  expected: end of input$"
+           (λ () (string->json "{} {}")))
+; Where no token begins, the error is where the lexer's rules that could
+; begin there got furthest, and says which kind of token it was lexing,
+; and nothing of the grammar, which has no part in what a token is.
+(check-exn #rx"^parse: unexpected end of input at line 1, column 4\n  lexing: null$"
+           (λ () (string->json "nul")))
+(check-exn #rx"unexpected text \"xcd\\\\\"]\" at line 1, column 6\n  lexing: string$"
+           (λ () (string->json "[\"ab\\xcd\"]")))
+(check-exn #rx"unexpected text \"G4\\\\\"]\" at line 1, column 13\n  lexing: string$"
+           (λ () (string->json "[1, \"caf\\u12G4\"]")))
+(check-exn #rx"unexpected end of input at line 1, column 16\n  lexing: string$"
+           (λ () (string->json "[\"unterminated]")))
+; A parser with its lexer around it says the same of a string, past the
+; whitespace before the first token.
+(check-exn #rx"^parse: unexpected end of input at line 3, column 6\n  lexing: null$"
+           (λ () (parse VALUE "\n\n  nul")))
+(check-exn #rx"^parse: unexpected text \"@\" at line 1, column 3\n  expected: VALUE$"
+           (λ () (parse VALUE "  @")))
+(check-exn #rx"^parse: unexpected end of input at line 1, column 3\n  expected: VALUE$"
+           (λ () (parse VALUE "  ")))
+; Lookahead past a token that was lexed doesn't count: the 2 is a number,
+; and no token begins with the dot.
+(check-exn #rx"unexpected text \".e5]\" at line 1, column 6\n  expected: value-separator or end-array\n  in: JSON-ARRAY$"
+           (λ () (string->json "[1, 2.e5]")))
+(check-exn #rx"unexpected number at line 1, column 4\n  expected: value-separator or end-array\n  in: JSON-ARRAY$"
+           (λ () (string->json "[1 2.]")))
+; It says what was expected there: a token's kind, or a named parser
+; that would have begun there, rather than what's in it, and names the
+; innermost named parser that the parse got there inside.
+(check-exn #rx"unexpected end of input at line 1, column 2\n  expected: JSON-VALUE or end-array\n  in: JSON-ARRAY$"
+           (λ () (string->json "[")))
+(check-exn #rx"unexpected number at line 1, column 6\n  expected: name-separator\n  in: JSON-PAIR$"
+           (λ () (string->json "{\"a\" 1}")))
+(check-exn #rx"unexpected text \"}\" at line 1, column 10\n  lexing: null$"
+           (λ () (string->json "{\"a\": nul}")))
+(check-exn #rx"unexpected begin-object at line 1, column 17\n  expected: JSON-PAIR\n  in: JSON-OBJECT$"
+           (λ () (string->json "{\"a\": {\"b\": 1}, {\"c\": 1}}")))
+(check-exn #rx"^tokens: unexpected text \"x\\\\\"\" at line 1, column 5\n  lexing: string$"
+           (λ () (tokens json-lexer "\"ab\\x\"")))
+(for ([text (in-list (list "" " " "[" "]" "[1,]" "[,1]" "[1 2]" "{\"a\"}" "{\"a\":}"
+                           "{1:2}" "{\"a\":1,}" "nul" "tru" "01" "1." "1e" "[1.]"
+                           "\"unterminated" "\"\\x\"" "[1]]" "{} {}" "@"))])
+  (check-exn exn:fail? (λ () (string->json text)) text))
 
 ; Start tests
-; Each kind of value begins with its own characters, so VALUE's alt runs
-; only one of them. A grammar change that loses a Start turns that off
-; without changing what parses, so these check them.
+; Each kind of value begins with its own kind of Token, and each Token
+; with its own characters, so JSON-VALUE's alt runs only one of them,
+; and so does the lexer's. A grammar change that loses a Start turns
+; that off without changing what parses, so these check them.
 ; Parser -> (list String Boolean)
 (define (start-string p)
   (let ([st (start-of p)])
     (and st (list (list->string (sort (remove-duplicates (start-chars st)) char<?))
                   (start-empty? st)))))
-(check-equal? (start-string VALUE) (list "\t\n\r \"-0123456789[fnt{" #f))
+; Parser -> (list [Listof Symbol] Boolean)
+(define (start-kinds p)
+  (let ([st (start-of p)])
+    (and st (list (sort (remove-duplicates (start-chars st)) symbol<?)
+                  (start-empty? st)))))
+(check-equal? (start-kinds JSON-VALUE)
+              (list '(begin-array begin-object false null number string true) #f))
+(check-equal? (start-kinds JSON-ARRAY) (list '(begin-array) #f))
+(check-equal? (start-kinds JSON-OBJECT) (list '(begin-object) #f))
+(check-equal? (start-kinds JSON-PAIR) (list '(string) #f))
 (check-equal? (start-string NUMBER) (list "-0123456789" #f))
 (check-equal? (start-string STRING) (list "\"" #f))
-(check-equal? (start-string ARRAY) (list "\t\n\r [" #f))
-(check-equal? (start-string OBJECT) (list "\t\n\r {" #f))
-(check-equal? (start-string PAIR) (list "\t\n\r \"" #f))
 
 ; string->json tests
 (define rjson-string1 "\"\"")

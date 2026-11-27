@@ -1,8 +1,10 @@
 #lang racket
 (require "parse.rkt"
+         "lex.rkt"
          (submod "parse.rkt" positions))
 
 (provide string->json
+         json-lexer
          VALUE
          NUMBER
          STRING
@@ -30,30 +32,80 @@
 ; wins. This is the shape Racket's `json` library uses for objects.
 
 ; String -> JSON
+; A JSON text is a value with whitespace around it. Over `json-lexer`'s
+; Source, the whitespace before the value belongs to its first Token, and
+; that after it to the end of the text, which `parse` asks for.
 (define (string->json str)
-  (parse VALUE str))
+  (parse VALUE (json-lexer str)))
 
 ; -------------------------------------
 ; ----- JSON Context Free Grammar -----
 ; -------------------------------------
 
+; JSON is parsed in two stages: `json-lexer`, at the end of this file,
+; turns the text into Tokens, and the grammar below parses the Tokens.
+; Only the lexer knows about whitespace, so the grammar never mentions it.
+;
+; VALUE, ARRAY, OBJECT and PAIR are that grammar, each with `json-lexer`
+; around it, so they take a String, or the Source `json-lexer` makes, or
+; work in any other grammar, of characters or of another lexer's Tokens.
+; Like any Token, the first takes the whitespace before it, and the
+; whitespace after the last is left to what comes next, which for
+; `parse` can be the end of the text. The grammar itself, over JSON's
+; Tokens alone, is provided by the `tokens` submodule.
+
+(define-parser VALUE (with-lexer json-lexer JSON-VALUE))
+(define-parser ARRAY (with-lexer json-lexer JSON-ARRAY))
+(define-parser OBJECT (with-lexer json-lexer JSON-OBJECT))
+(define-parser PAIR (with-lexer json-lexer JSON-PAIR))
+
+(module+ tokens
+  (provide JSON-VALUE
+           JSON-ARRAY
+           JSON-OBJECT
+           JSON-PAIR))
+
 ; Parser
-; Matches a value with any whitespace around it. As in JSON's grammar,
-; the whitespace between tokens belongs to the values, so it's looked
-; for once: a value skips the whitespace on both sides, and the
-; punctuation around it skips none. Each kind of value begins with its
-; own characters, so `alt` runs only the parser for the kind the first
-; character says, rather than trying each in turn.
-(define-parser VALUE
-  (unwrap SKIP-SPACE
-          (alt (pmap (const 'null) (lit "null"))
-               (pmap (const true) (lit "true"))
-               (pmap (const false) (lit "false"))
-               NUMBER
-               STRING
-               ARRAY
-               OBJECT)
-          SKIP-SPACE))
+; Each kind of value begins with its own kind of Token, so `alt` runs
+; only the parser for the kind the next Token is, rather than trying each
+; in turn.
+(define-parser JSON-VALUE
+  (alt (tok 'null)
+       (tok 'true)
+       (tok 'false)
+       (tok 'number)
+       (tok 'string)
+       JSON-ARRAY
+       JSON-OBJECT))
+
+; Parser
+(define-parser JSON-ARRAY
+  (unwrap (tok 'begin-array)
+          (sep-by* JSON-VALUE (tok 'value-separator))
+          (tok 'end-array)))
+
+; Parser
+(define-parser JSON-OBJECT
+  (pmap (lambda (open pairs close)
+          (for/hasheq ([pair (in-list pairs)])
+            (values (car pair) (cdr pair))))
+        (tok 'begin-object)
+        (sep-by* JSON-PAIR (tok 'value-separator))
+        (tok 'end-object)))
+
+; Parser
+(define-parser JSON-PAIR
+  (pmap (lambda (name separator value)
+          (cons (string->symbol name) value))
+        (tok 'string)
+        (tok 'name-separator)
+        JSON-VALUE))
+
+; -------------------------------
+; ----- Numbers and Strings -----
+; -------------------------------
+
+; The lexer's rules for numbers and strings, written over characters.
 
 ; Parser
 ; The value is the exact number the text names: the integer and fraction
@@ -101,7 +153,7 @@
 
 ; Parser
 ; Matches a run of digits.
-(define DIGITS (span "0123456789"))
+(define-parser DIGITS (span "0123456789"))
 
 ; Parser
 ; Plain text is matched a run at a time with `span`, rather than a
@@ -157,18 +209,18 @@
 ; Parser
 ; Matches the four hexadecimal digits of a `\u` escape, producing the
 ; UTF-16 code unit they name as a Natural. It has a Run of its own, since
-; `span` can't match a fixed number of characters.
+; `span` can't match a fixed number of characters, and fails where a
+; digit is missing, at the first character that isn't one.
 (define CODE-UNIT
   (parser
-   (lambda (s i)
+   (lambda (in i)
+     (define s (input-text in))
      (let ([end (+ i 4)])
-       (if (<= end (string-length s))
-           (let loop ([j i] [n 0])
-             (cond [(= j end) (matched n j)]
-                   [(hex-digit (string-ref s j))
-                    => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
-                   [else 'error]))
-           'error)))))
+       (let loop ([j i] [n 0])
+         (cond [(= j end) (matched n j)]
+               [(and (< j (string-length s)) (hex-digit (string-ref s j)))
+                => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
+               [else (fail in j)]))))))
 
 ; Char -> [Maybe Natural]
 ; The value of `c` as a hexadecimal digit, or #f if it isn't one.
@@ -205,50 +257,24 @@
 (define (string-char? c)
   (not (or (char=? c #\") (char=? c #\\) (char<? c #\space))))
 
-; Parser
-; Matches an array with any whitespace around it. Inside a value, the
-; value has already skipped the whitespace before it, so that skip finds
-; none.
-(define-parser ARRAY
-  (pmap (lambda (space open vs close space2) vs)
-        SKIP-SPACE
-        (lit "[")
-        (comma-separated VALUE)
-        (lit "]")
-        SKIP-SPACE))
+; -----------------
+; ----- Lexer -----
+; -----------------
 
-; Parser
-; Matches an object with any whitespace around it, as for `ARRAY`.
-(define-parser OBJECT
-  (pmap (lambda (space open pairs close space2)
-          (for/hasheq ([pair (in-list pairs)])
-            (values (car pair) (cdr pair))))
-        SKIP-SPACE
-        (lit "{")
-        (comma-separated PAIR)
-        (lit "}")
-        SKIP-SPACE))
-
-; Parser
-; Matches a pair with any whitespace around it.
-(define-parser PAIR
-  (pmap (lambda (space name space2 colon value)
-          (cons (string->symbol name) value))
-        SKIP-SPACE
-        STRING
-        SKIP-SPACE
-        (lit ":")
-        VALUE))
-
-; Parser -> Parser
-; Matches one or more `p`s separated by commas, producing the list of
-; their values, or only whitespace, producing '(). Each `p` skips the
-; whitespace around itself, so the commas don't.
-(define (comma-separated p)
-  (alt (sep-by+ p (lit ","))
-       (pmap (const '()) SKIP-SPACE)))
-
-; Parser
-; Matches zero or more whitespace characters, producing '(). It moves
-; past the whitespace without copying it.
-(define SKIP-SPACE (skip " \t\n\r"))
+; Lexer
+; NUMBER and STRING are parsers over characters, so a number's Token
+; holds the Number, and a string's the decoded String. Unlike a parser,
+; a lexer is made when it's defined, so it comes after its rules.
+(define json-lexer
+  (lexer #:skip " \t\n\r"
+         ['begin-object (lit "{")]
+         ['end-object (lit "}")]
+         ['begin-array (lit "[")]
+         ['end-array (lit "]")]
+         ['value-separator (lit ",")]
+         ['name-separator (lit ":")]
+         ['null (pmap (const 'null) (lit "null"))]
+         ['true (pmap (const #t) (lit "true"))]
+         ['false (pmap (const #f) (lit "false"))]
+         ['number NUMBER]
+         ['string STRING]))

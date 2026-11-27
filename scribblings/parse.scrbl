@@ -4,28 +4,56 @@
           (for-label racket/base
                      racket/contract/base
                      parser-combinator/parse
-                     (submod parser-combinator/parse positions)))
+                     (submod parser-combinator/parse positions)
+                     (only-in parser-combinator/lex tok with-lexer)
+                     (only-in parser-combinator/json json-lexer)))
 
 @(define Value @tech{Value})
 @(define Parser @tech{Parser})
 @(define Result @tech{Result})
+@(define Input @tech{Input})
 
 @title[#:tag "parse"]{Parsers and Combinators}
 
 @defmodule[parser-combinator/parse #:packages ("parser-combinator")
            #:use-sources ((submod parser-combinator/parse positions))]
 
-@defproc[(parse [p #,Parser] [str string?]) #,Value]{
- applies @Parser @racket[p] to @racket[str] and produces the resulting
- @|Value|.
+@defproc[(parse [p #,Parser] [in #,Input]) #,Value]{
+ applies @Parser @racket[p] to the @Input @racket[in] and produces the
+ resulting @|Value|.
  Unlike applying @racket[p] directly, @racket[parse] demands that
- @racket[p] consume all of @racket[str]. It raises
- @racket[exn:fail] if @racket[p] fails or leaves text over.
+ @racket[p] consume all of @racket[in]. After a match that ends with
+ that of a parser made by @racket[with-lexer], what its lexer skips can
+ be left. It raises @racket[exn:fail] if
+ @racket[p] fails or leaves text over. The error gives the line and
+ column where the parse got furthest: the furthest position any parser
+ failed at, or where @racket[p]'s match ended. It may add these fields,
+ one per line:
+@itemlist[
+ @item{@tt{lexing:} when no token could be read there, the kind of
+ token whose rule got furthest. The error points to where that rule
+ stopped, and no other fields are shown, since the grammar plays no
+ part in reading a token.}
+ @item{@tt{expected:} what would have matched there: the text of a
+ @racket[lit], a character of a @racket[span] given a string, the kind
+ of a @racket[tok], the end of input, or the name of a named parser
+ that could start there. Parsers given a predicate or a @Run,
+ @racket[rx], and @racket[where] don't say what they expect.}
+ @item{@tt{in:} the innermost parser named with @racket[define-parser],
+ or by @racket[parser] with a name, that started before that point and
+ was still running there.}
+]
+
+ To fill in these fields, @racket[parse] runs @racket[p] a second time,
+ so the functions given to @racket[pmap] run twice when a parse fails.
 
 @examples[#:eval parse-eval
 (parse (lit "hi") "hi")
 (eval:error (parse (lit "hi") "bye"))
 (eval:error (parse (lit "hi") "high"))
+(define-parser GREETING
+  (seq (lit "hi ") (alt (lit "you") (lit "all"))))
+(eval:error (parse GREETING "hi yall"))
 ]}
 
 @; -----------------------------------------------------------------------------
@@ -34,7 +62,7 @@
 @deftech{Value} : @racket[any/c]
 
 A @Value is whatever a @Parser produces when it matches. The parsers in
- this library produce plain Racket values:
+ this package produce plain Racket values:
 @itemlist[
  @item{@racket[emp] produces the @Value it's given, or @racket['()]}
  @item{@racket[lit], @racket[rx], and @racket[span] produce the matched
@@ -55,9 +83,23 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
  the parser they don't skip}
  @item{@racket[sep-by*] and @racket[sep-by+] produce the list of their
  parser's @|Value|s, without the separators'}
+ @item{@racket[tok] produces the value of the token it matched}
+ @item{@racket[with-lexer] produces its parser's @Value}
 ]
 The functions given to @racket[pmap] are where a grammar builds the data
  the program needs, such as a number, or a structure of its own.
+
+@deftech{Input} : @racket[input?]
+
+An @Input is the text a parser matches: a string, or what a
+ @seclink["lex"]{lexer} such as @racket[json-lexer] makes from one. A
+ lexer's @Input also splits the text into tokens. Parsers over
+ characters, like @racket[lit], work on either kind, and a grammar over
+ tokens needs a lexer's.
+
+@defproc[(input? [v any/c]) boolean?]{
+ returns @racket[#t] if @racket[v] is an @|Input|: a string, or what a
+ lexer makes.}
 
 @deftech{Result} : @racket[(or/c 'error result?)]
 
@@ -66,31 +108,33 @@ A @Result is one of:
  @item{@racket['error], meaning the parser did not match}
  @item{@racket[(result _value _remaining)], meaning the parser matched a
  prefix of its input, producing @racket[_value], and left the rest of
- it, the string @racket[_remaining], unconsumed}
+ it, the @Input @racket[_remaining], unconsumed. It's a string when the
+ input was a string, and otherwise what a lexer would make of the rest.}
 ]
 
-@deftech{Parser} : @racket[(-> string? (or/c 'error result?))]
+@defstruct*[result ([value #,Value] [remaining #,Input]) #:transparent]{
+ represents a successful match, as produced by any @Parser that matches.
+ See @|Result|.}
 
-A @Parser is a function that consumes a string and produces a @|Result|.
- A parser only ever matches a @emph{prefix} of its input. It is up to
- @racket[parse] to insist that a match covers the whole string.
+@deftech{Parser} : @racket[parser?]
 
-Parsers are functions. A parser can be applied directly to a
- string:
+A @Parser is made by the combinators below, or by @racket[parser] from
+ a @tech{Run} (see @secref["run-parsers"]). A combinator given anything
+ else raises @racket[exn:fail:contract] when it makes its parser. A
+ parser only ever matches a @emph{prefix} of its input. It is up to
+ @racket[parse] to insist that a match covers the whole input.
+
+Parsers are functions. A parser can be applied directly to an @Input,
+ such as a string, producing a @|Result|:
 
 @examples[#:eval parse-eval
 ((lit "hi") "high")
 ((lit "hi") "bye")
 ]
 
-The parsers made by this library pass positions in the input to one
- another rather than copying it, so applying a parser copies the input
- only once, for the @racket[_remaining] string of its @|Result|. See
- @secref["run-parsers"] to write parsers that work the same way.
-
-@defstruct*[result ([value #,Value] [remaining string?]) #:transparent]{
- represents a successful match, as produced by any @Parser that matches.
- See @|Result|.}
+Parsers pass positions to one another instead of copying the input.
+ Applying a parser copies the input once, for the @racket[_remaining]
+ of its @|Result|.
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "defining"]{Defining Parsers}
@@ -99,15 +143,15 @@ The parsers made by this library pass positions in the input to one
  defines @racket[id] as a @Parser that behaves like @racket[parser-expr].
 
  Unlike @racket[define], @racket[define-parser] does not evaluate
- @racket[parser-expr] until @racket[id] is first applied to a string.
- This lets a parser refer to itself. It can also refer to parsers that
- are defined later in the module. After that first application,
- @racket[id] keeps the parser that @racket[parser-expr] produced, so
- @racket[parser-expr] is evaluated only once, rather than every time the
- parser runs.
+ @racket[parser-expr] until @racket[id] is first run. This lets a
+ parser refer to itself. It can also refer to parsers that are defined
+ later in the module. After that first run, @racket[id] keeps the
+ parser that @racket[parser-expr] produced, so @racket[parser-expr] is
+ evaluated only once, rather than every time the parser runs.
 
  The parser's @racket[object-name] is @racket[id], so it prints with
- that name.
+ that name, and @racket[parse]'s error names it when the parse fails
+ inside it.
 
 @examples[#:eval parse-eval
 (code:comment "Parser")
@@ -128,8 +172,8 @@ PARENS
  produces a @Parser that always succeeds without consuming any input.
  The @Value is @racket[v].
 
- Note that @racket[emp] is a function that produces a parser, not a
- parser itself, so it is used as @racket[(emp)].
+ @racket[emp] makes a parser, rather than being one, so it's written
+ @racket[(emp)], with parentheses.
 
 @examples[#:eval parse-eval
 ((emp) "abc")
@@ -280,9 +324,9 @@ PARENS
 
  Any other parser could start with any character, so @racket[alt]
  always tries it. That covers an @racket[rx], a @racket[span] or
- @racket[skip] given a function, a parser written as a plain function,
- and one made with @racket[parser]. It also covers a parser built with
- one of them at its start, such as @racket[(seq (rx #px"\\d") _p)].}
+ @racket[skip] given a function, and a parser made with
+ @racket[parser]. It also covers a parser built with one of them at its
+ start, such as @racket[(seq (rx #px"\\d") _p)].}
 
 @defproc[(opt [p #,Parser] [default any/c '()]) #,Parser]{
  produces a @Parser that behaves like @racket[p] if @racket[p] matches,
@@ -330,28 +374,15 @@ PARENS
 
 @defproc[(where [ok? (-> #,Value any/c)] [p #,Parser]) #,Parser]{
  produces a @Parser that matches what @racket[p] matches, but only when
- @racket[ok?] accepts its @|Value|. Otherwise it fails, as if
- @racket[p] had not matched. The @Value is @racket[p]'s.
+ @racket[ok?] accepts its @|Value|. Otherwise it fails where @racket[p]
+ began, so a parse that fails there says what @racket[p] matched. The
+ @Value is @racket[p]'s.
 
 @examples[#:eval parse-eval
 (define NUMBER (pmap string->number (rx #px"\\d+")))
 (define BYTE (where byte? NUMBER))
 (parse BYTE "200")
-(eval:error (parse BYTE "300"))
-]
-
- It is the way to restrict a match by its @Value without writing a
- @Parser as a plain function, which would be given a copy of the rest of
- the input every time it runs. Written as a plain function,
- @racket[where] would be:
-
-@examples[#:label #f #:eval parse-eval
-(define (plain-where ok? p)
-  (lambda (s)
-    (let ([r (p s)])
-      (if (and (result? r) (ok? (result-value r)))
-          r
-          'error))))
+(eval:error (parse (seq (lit "x=") BYTE) "x=300"))
 ]}
 
 @defproc[(unwrap [left #,Parser] [body #,Parser] [right #,Parser]) #,Parser]{
@@ -417,23 +448,25 @@ PARENS
 ]}
 
 @; -----------------------------------------------------------------------------
-@section[#:tag "run-parsers"]{Run Parsers}
+@section[#:tag "run-parsers"]{Writing Parsers by Hand}
 
 @(define Match @tech{Match})
 @(define Run @tech{Run})
 
 @defmodule[(submod parser-combinator/parse positions) #:packages ("parser-combinator")]
 
-The parsers made by @racketmodname[parser-combinator/parse] each hold a
- @Run, which matches the input from a position, and call each other's
- @|Run|s rather than copying the input. This module provides those
- pieces, for a parser that can't be built from the combinators, such as
- one whose grammar depends on what it has already matched.
+Every @Parser is made either by the combinators above, or by
+ @racket[parser], out of a @Run written by hand. Prefer the combinators.
+ They know what each parser can begin with, so @racket[alt] can skip
+ alternatives that can't match, and they record where they fail, for
+ @racket[parse]'s errors. Write a @Run for what the combinators can't
+ express, such as a fixed count of characters, a grammar that depends
+ on what it already matched, or a tight loop over characters.
 
-A @Parser written as a plain function also works with the combinators,
- but it is given a copy of the rest of the input every time it runs, so
- inside a loop like @racket[star] it makes parsing quadratic. A
- @racket[parser] written with this module doesn't copy.
+@deftech{Run} : @racket[(-> input? exact-nonnegative-integer? (or/c 'error matched?))]
+
+A @Run is given an @Input and a position in its text, matches from
+ that position, and produces a @|Match|.
 
 @deftech{Match} : @racket[(or/c 'error matched?)]
 
@@ -442,34 +475,47 @@ A @Match is one of:
  @item{@racket['error], meaning the parser did not match}
  @item{@racket[(matched _value _end)], meaning the parser matched,
  producing @racket[_value], and the match ended just before position
- @racket[_end] of the input}
+ @racket[_end] of the input's text}
 ]
-
-@deftech{Run} : @racket[(-> string? exact-nonnegative-integer? (or/c 'error matched?))]
-
-A @Run matches its string starting at the given position, and produces
- a @|Match|.
 
 @defstruct*[matched ([value #,Value] [end exact-nonnegative-integer?]) #:transparent]{
  represents a successful match, as produced by a @Run that matches. See
  @|Match|.}
 
+A @Run that follows these rules works like the combinators, in any
+ grammar:
+@itemlist[
+ @item{It reads the text with @racket[input-text]. The @Input may be a
+ lexer's, so it isn't necessarily a string.}
+ @item{It produces @racket[(matched _value _end)], where @racket[_end]
+ is the position just after its match, or @racket['error].}
+ @item{It runs other parsers with @racket[run], passing its own @Input
+ and a position, so they work over tokens as well as characters.}
+ @item{When the text is wrong, it fails with @racket[fail] at the bad
+ position, so @racket[parse]'s error points there. Producing
+ @racket['error] instead fails at the position the @Run started from.}
+]
+
+@racket[alt] always tries a parser made with @racket[parser]. If all
+ of a @Run's matches begin with the same text, match that text with a
+ @racket[lit] first, and write the @Run for the rest, so @racket[alt]
+ can skip it.
+
 @defform*[((parser run-expr)
            (parser run-expr name-expr))
           #:contracts ([run-expr #,Run]
                        [name-expr (or/c symbol? #f)])]{
- makes a @Parser from a @|Run|. Applying it to a string calls its
- @Run from position @racket[0], and turns the @Match into a @|Result|,
- copying the rest of the input once, for its @racket[_remaining]. The
- combinators in @racketmodname[parser-combinator/parse] call its @Run
- directly, with positions, so used inside a grammar it never copies.
+ makes a @Parser from a @|Run|. Applied to an @Input, the parser calls
+ its @Run from position @racket[0], and turns the @Match into a
+ @|Result|.
 
 @examples[#:eval positions-eval
 (code:comment "Char-Predicate -> Parser")
 (code:comment "matches one character that `ok?` accepts")
 (define (char-where ok?)
   (parser
-   (lambda (s i)
+   (lambda (in i)
+     (define s (input-text in))
      (if (and (< i (string-length s))
               (ok? (string-ref s i)))
          (matched (string (string-ref s i)) (add1 i))
@@ -478,47 +524,41 @@ A @Run matches its string starting at the given position, and produces
 ((char-where char-numeric?) "7up")
 ]
 
- The value of @racket[name-expr] is the parser's @racket[object-name],
- so the parser prints with that name. Without a name, or with
+ The value of @racket[name-expr] names the parser, as @racket[id] names
+ one made with @racket[define-parser]. Without a name, or with
  @racket[#f], it prints as @racketresultfont{#<procedure>}.
 
 @examples[#:eval positions-eval
-(parser (lambda (s i) 'error) 'NEVER)
-(parser (lambda (s i) 'error))
+(parser (lambda (in i) 'error) 'NEVER)
+(parser (lambda (in i) 'error))
 ]
 
  @racket[parser] is a form, not a function, so it can't be passed to
  @racket[apply] or used as a value. A form makes the parser where its
  @Run is written, so Racket's compiler can see the @Run, which makes
- parsing faster.
-
- @racket[alt] can't tell which characters the matches of such a parser
- start with, so it always tries it. When they all start with the same
- text, match that text with a @racket[lit] first, and write a @Run for
- the rest.}
+ parsing faster.}
 
 @defproc[(parser? [v any/c]) boolean?]{
- returns @racket[#t] if @racket[v] was made by @racket[parser], or by
- one of the combinators.}
+ returns @racket[#t] if @racket[v] is a @|Parser|: one made by
+ @racket[parser], or by one of the combinators.}
 
-@defproc[(parser-run [p parser?]) #,Run]{
- produces the @Run of @racket[p].}
+@defproc[(input-text [in #,Input]) string?]{
+ produces the text of @racket[in], which a @Run matches from the
+ position it's given. It returns the text itself, without copying it.}
 
-@defproc[(run [p #,Parser] [str string?] [i exact-nonnegative-integer?])
-         (or/c 'error matched?)]{
- runs @racket[p] on @racket[str] from position @racket[i], producing a
- @|Match|. If @racket[p] is a @racket[parser], this calls its @|Run|.
- Otherwise @racket[p] is a plain function, and it is applied to a copy of
- @racket[str] from @racket[i] on. A @Run uses @racket[run] to run other
- parsers.
+@defproc[(run [p #,Parser] [in #,Input] [i exact-nonnegative-integer?])
+         #,Match]{
+ runs @racket[p] on @racket[in] from position @racket[i], producing a
+ @|Match|. A @Run uses @racket[run] to run other parsers, passing its
+ own input.
 
 @examples[#:eval positions-eval
 (code:comment "Parser -> Parser")
 (code:comment "matches a digit n, then n of `p`, producing their list")
 (define (counted p)
   (parser
-   (lambda (s i)
-     (let ([n (run (rx #rx"[0-9]") s i)])
+   (lambda (in i)
+     (let ([n (run (rx #rx"[0-9]") in i)])
        (if (symbol? n)
            'error
            (let loop ([k (string->number (matched-value n))]
@@ -526,7 +566,7 @@ A @Run matches its string starting at the given position, and produces
                       [vs '()])
              (if (zero? k)
                  (matched (reverse vs) i)
-                 (let ([m (run p s i)])
+                 (let ([m (run p in i)])
                    (if (symbol? m)
                        'error
                        (loop (sub1 k)
@@ -535,19 +575,29 @@ A @Run matches its string starting at the given position, and produces
 (run (counted (lit "ab")) "x2ababab" 1)
 (parse (counted (lit "ab")) "3ababab")
 (eval:error (parse (counted (lit "ab")) "2ababab"))
-]
+]}
 
- A plain function's match ends where its @racket[_remaining] begins,
- which @racket[run] finds from the length of @racket[_remaining] alone,
- not its text. So @racket[_remaining] must be the end of the string that
- the function was given. @racket[run] raises @racket[exn:fail:contract]
- if it is longer than that string. It doesn't detect other text of that
- length or shorter.
+@defproc[(fail [in #,Input] [i exact-nonnegative-integer?]) 'error]{
+ produces @racket['error] for a @Run to fail with, and records that the
+ parse got to position @racket[i] of @racket[in]. If the parse fails
+ and gets no further, @racket[parse]'s error points there, as it does
+ for the library's own parsers. This lets a @Run point at the bad
+ character instead of where it started.
 
 @examples[#:eval positions-eval
 (code:comment "Parser")
-(code:comment "matches nothing, but gives back more text than it got")
-(define (GROW s)
-  (result 'g (string-append "zz" s)))
-(eval:error (run GROW "abc" 1))
+(code:comment "matches two digits")
+(define TWO-DIGITS
+  (parser
+   (lambda (in i)
+     (define s (input-text in))
+     (let loop ([j i])
+       (cond [(= j (+ i 2))
+              (matched (substring s i j) j)]
+             [(and (< j (string-length s))
+                   (char-numeric? (string-ref s j)))
+              (loop (add1 j))]
+             [else (fail in j)])))))
+(parse TWO-DIGITS "42")
+(eval:error (parse TWO-DIGITS "4x"))
 ]}

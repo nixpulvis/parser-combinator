@@ -5,9 +5,11 @@
 ; and the Starts, which the tests check.
 (require (submod "../parse.rkt" private))
 ; The positions module's `parser` takes a name where the private one's
-; takes a Start.
+; takes a Start, and its `run` takes a String too.
 (require (prefix-in positions: (only-in (submod "../parse.rkt" positions)
-                                        parser)))
+                                        parser
+                                        run
+                                        fail)))
 
 ; String ... -> [Exn -> Boolean]
 ; Whether an exception's message is the `parts` joined together.
@@ -134,12 +136,13 @@
 ; Only the alternatives that could match the next character are run.
 (define tried '())
 (define (spy-for name c)
-  (parser (lambda (s i)
+  (parser (lambda (in i)
             (set! tried (cons name tried))
+            (define s (input-text in))
             (if (and (< i (string-length s)) (char=? (string-ref s i) c))
                 (matched name (add1 i))
                 'error))
-          (start (list c) #f)))
+          (start (list c) #f '())))
 (define SPIED (alt (spy-for 'a #\a) (spy-for 'b #\b) (spy-for 'c #\c)))
 (check-equal? (list (SPIED "c") (SPIED "b") (SPIED "x") tried)
               (list (result 'c "") (result 'b "") 'error '(b c)))
@@ -147,11 +150,11 @@
 ; ones it skips. `in-order` has a Run written by hand, so it tries them
 ; all.
 (define (in-order . ps)
-  (parser (lambda (s i)
+  (parser (lambda (in i)
             (let loop ([ps ps])
               (if (null? ps)
                   'error
-                  (let ([m (run (car ps) s i)])
+                  (let ([m (run (car ps) in i)])
                     (if (symbol? m) (loop (cdr ps)) m)))))))
 (for* ([ps (list (list (lit "a") (lit "ab") (lit "b"))
                  (list (lit "ab") (lit "a") (emp 0))
@@ -189,8 +192,8 @@
 (check-equal? (chars-of (skip char-numeric?)) #f)
 ; A parser with a Run written by hand has no Start, and one after a
 ; `lit` doesn't need one.
-(check-equal? (chars-of (parser (lambda (s i) 'error))) #f)
-(check-equal? (chars-of (preceded (lit "u") (parser (lambda (s i) 'error))))
+(check-equal? (chars-of (parser (lambda (in i) 'error))) #f)
+(check-equal? (chars-of (preceded (lit "u") (parser (lambda (in i) 'error))))
               (list (list #\u) #f))
 (check-equal? (chars-of (rx #rx"a")) #f)
 (check-equal? (chars-of (seq (opt (lit "-")) (lit "1") (lit "2")))
@@ -346,14 +349,14 @@
 ; consumes something and then the rest, or else nothing.
 (define (star-by-recursion p)
   (letrec ([consuming (parser
-                       (lambda (s i)
-                         (let ([m (run p s i)])
+                       (lambda (in i)
+                         (let ([m (run p in i)])
                            (if (and (matched? m) (> (matched-end m) i))
                                m
                                'error))))]
            [self (alt (pmap cons
                             consuming
-                            (parser (lambda (s i) (run self s i))))
+                            (parser (lambda (in i) (run self in i))))
                       (emp))])
     self))
 (for* ([p (list (lit "a")
@@ -417,20 +420,27 @@
   (check-equal? ((sep-by+ (lit "a") (lit ",")) s)
                 ((pmap cons (lit "a") (star (preceded (lit ",") (lit "a")))) s)))
 
-; plain function parsers
-; A plain function is given the rest of the input, and its `remaining`
-; tells the combinators where its match ended.
-(check-equal? ((seq (lit "ab") (lambda (s) (result s (substring s 1)))) "abcd")
-              (result (list "ab" "cd") "d"))
-(check-equal? ((seq (lit "a") (lambda (s) 'error)) "ab")
-              'error)
+; A parser is made by the combinators, or by `parser` from a Run, and a
+; combinator given anything else says so when it's made.
+(for ([make (list (λ (q) (seq (lit "a") q))
+                  (λ (q) (alt q))
+                  (λ (q) (star q))
+                  (λ (q) (pmap values q))
+                  (λ (q) (where values q))
+                  (λ (q) (sep-by* q (lit ",")))
+                  (λ (q) (unwrap (lit "(") q (lit ")"))))])
+  (check-exn exn:fail:contract? (λ () (make (lambda (s) 'error)))))
+(check-exn exn:fail:contract? (λ () (parse (lambda (s) 'error) "a")))
+(define-parser NOT-A-PARSER "a")
+(check-exn #rx"NOT-A-PARSER: contract violation" (λ () (parse NOT-A-PARSER "a")))
 
 ; positions tests
 ; Char-Predicate -> Parser
 ; matches one character that `ok?` accepts
 (define (char-where ok?)
   (parser
-   (lambda (s i)
+   (lambda (in i)
+     (define s (input-text in))
      (if (and (< i (string-length s)) (ok? (string-ref s i)))
          (matched (string (string-ref s i)) (add1 i))
          'error))))
@@ -440,41 +450,92 @@
               'error)
 (check-equal? ((seq (lit "1") (star (char-where char-alphabetic?))) "1ab2")
               (result (list "1" (list "a" "b")) "2"))
-(check-equal? (run (lit "b") "ab" 1)
+(check-equal? (positions:run (lit "b") "ab" 1)
               (matched "b" 2))
-(check-equal? (run (lit "b") "ab" 0)
+(check-equal? (positions:run (lit "b") "ab" 0)
               'error)
-(check-equal? (run (lambda (s) (result s (substring s 1))) "abc" 1)
-              (matched "bc" 2))
-; A parser made with `parser` is given the input itself, not a copy.
+(check-exn exn:fail:contract? (λ () (positions:run (lit "b") 'ab 0)))
+(check-exn exn:fail:contract? (λ () (positions:run (lambda (s) 'error) "ab" 0)))
+(check-exn exn:fail:contract? (λ () (positions:run (lit "b") "ab" -1)))
+(check-exn exn:fail:contract? (λ () (positions:run (lit "b") "ab" 3)))
+; A parser made with `parser` is given the input's text itself, not a
+; copy.
 (define seen #f)
 (define spy
-  (parser (lambda (s i)
-            (set! seen (cons s i))
+  (parser (lambda (in i)
+            (set! seen (cons (input-text in) i))
             (matched '() i))))
 (define spied "ab!")
 (check-equal? (begin ((seq (lit "ab") spy) spied)
                      (and (eq? (car seen) spied) (cdr seen)))
               2)
-(check-equal? (object-name (positions:parser (lambda (s i) 'error) 'NAMED))
+(check-equal? (object-name (positions:parser (lambda (in i) 'error) 'NAMED))
               'NAMED)
-(check-equal? (object-name (positions:parser (lambda (s i) 'error))) #f)
-; A plain-function parser can't give back more text than it was given.
-(define (GROW s)
-  (result 'g (string-append "zz" s)))
-(check-exn (message-is "run: parser's remaining is longer than its input\n"
-                       "  parser: #<procedure:GROW>\n"
-                       "  input: \"bc\"\n"
-                       "  remaining: \"zzbc\"")
-           (λ () ((unwrap (lit "a") GROW (lit "c")) "abc")))
-(define (BACK-ONE s)
-  (result 'b (string-append "x" s)))
-(check-exn exn:fail:contract?
-           (λ () ((unwrap (lit "a") BACK-ONE (lit "a")) "ab")))
+(check-equal? (object-name (positions:parser (lambda (in i) 'error))) #f)
+; A Run written by hand fails where it was run, or where it says with
+; `fail`, so a parse that fails there is reported there.
+(check-exn (message-is "parse: unexpected text \"c\" at line 1, column 3")
+           (λ () (parse (seq (lit "ab") (positions:parser (lambda (in i) 'error)))
+                        "abc")))
+(check-exn (message-is "parse: unexpected text \"d\" at line 1, column 4")
+           (λ () (parse (seq (lit "ab")
+                             (positions:parser (lambda (in i) (positions:fail in (add1 i)))))
+                        "abcd")))
+(check-equal? (positions:fail "ab" 1) 'error)
+(check-exn exn:fail:contract? (λ () (positions:fail 'ab 1)))
+(check-exn exn:fail:contract? (λ () (positions:fail "ab" -1)))
+(check-exn exn:fail:contract? (λ () (positions:fail "ab" 3)))
 
 ; parse tests
 (check-equal? (parse (emp) "") '())
-(check-exn (message-is "bad input, got error")
+; A failed parse says what it found where it got furthest, by line and
+; column: where a parser failed, or where the match ended, and what was
+; expected there.
+(check-exn (message-is "parse: unexpected text \"b\" at line 1, column 1\n"
+                       "  expected: \"a\"")
            (λ () (parse (lit "a") "b")))
-(check-exn (message-is "bad input, had leftover text \"{}\"")
+(check-exn (message-is "parse: unexpected text \"{}\" at line 1, column 1\n"
+                       "  expected: end of input")
            (λ () (parse (emp) "{}")))
+(check-exn (message-is "parse: unexpected text \"gh\" at line 1, column 3\n"
+                       "  expected: end of input")
+           (λ () (parse (lit "hi") "high")))
+(check-exn (message-is "parse: unexpected text \"p\" at line 1, column 4\n"
+                       "  expected: \"hello\"")
+           (λ () (parse (lit "hello") "help")))
+; where fails where its parser began, where the Value it rejects is, and
+; says nothing it expected.
+(check-exn (message-is "parse: unexpected text \"300\" at line 1, column 3")
+           (λ () (parse (seq (lit "x=") (where byte? (pmap string->number (rx #px"\\d+"))))
+                        "x=300")))
+(check-exn (message-is "parse: unexpected end of input at line 1, column 2\n"
+                       "  expected: \"ab\"")
+           (λ () (parse (lit "ab") "a")))
+(check-exn (message-is "parse: unexpected text \"d\" at line 1, column 3\n"
+                       "  expected: \"bc\"")
+           (λ () (parse (seq (lit "a") (opt (lit "bc"))) "abd")))
+(check-exn (message-is "parse: unexpected text \"c\" at line 2, column 1\n"
+                       "  expected: \"b\"")
+           (λ () (parse (seq (lit "a\n") (lit "b")) "a\nc")))
+; alt says what the alternatives it skipped would have begun with.
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2\n"
+                       "  expected: \"b\" or \"c\"")
+           (λ () (parse (seq (lit "a") (alt (lit "b") (lit "c"))) "ax")))
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2\n"
+                       "  expected: \"0\", \"1\" or end of input")
+           (λ () (parse (seq (lit "a") (opt (span "01"))) "ax")))
+(define-parser NESTED
+  (star (unwrap (lit "(") NESTED (lit ")"))))
+(check-exn (message-is "parse: unexpected end of input at line 1, column 4\n"
+                       "  expected: \"(\" or \")\"\n"
+                       "  in: NESTED")
+           (λ () (parse NESTED "(()")))
+; A named parser that would have begun there is what was expected, rather
+; than what's in it, and one made with `parser` and a name is named too.
+(define-parser DIGIT (alt (lit "0") (lit "1")))
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2\n"
+                       "  expected: DIGIT")
+           (λ () (parse (seq (lit "a") DIGIT) "ax")))
+(check-exn (message-is "parse: unexpected text \"b\" at line 1, column 2\n"
+                       "  expected: NEVER")
+           (λ () (parse (seq (lit "a") (positions:parser (lambda (in i) 'error) 'NEVER)) "ab")))

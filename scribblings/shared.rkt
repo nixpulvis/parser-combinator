@@ -9,7 +9,8 @@
          parse-eval
          positions-eval
          quick-eval
-         json-eval)
+         json-eval
+         lex-eval)
 
 ; Example lines, including the "> " prompt, fit in this many columns, so
 ; that they fit on a phone screen. Example sources are wrapped to match.
@@ -33,3 +34,4 @@
                  '(submod parser-combinator/parse positions)))
 (define quick-eval (make-doc-eval))
 (define json-eval (make-doc-eval 'parser-combinator/parse 'parser-combinator/json))
+(define lex-eval (make-doc-eval 'parser-combinator/parse 'parser-combinator/lex))
