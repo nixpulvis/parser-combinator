@@ -5,9 +5,11 @@
 ; and the Starts, which the tests check.
 (require (submod "../parse.rkt" private))
 ; The positions module's `parser` takes a name where the private one's
-; takes a Start.
+; takes a Start, and its `run` takes a String too.
 (require (prefix-in positions: (only-in (submod "../parse.rkt" positions)
-                                        parser)))
+                                        parser
+                                        parser-run
+                                        run)))
 
 ; String ... -> [Exn -> Boolean]
 ; Whether an exception's message is the `parts` joined together.
@@ -134,8 +136,9 @@
 ; Only the alternatives that could match the next character are run.
 (define tried '())
 (define (spy-for name c)
-  (parser (lambda (s i)
+  (parser (lambda (in i)
             (set! tried (cons name tried))
+            (define s (input-text in))
             (if (and (< i (string-length s)) (char=? (string-ref s i) c))
                 (matched name (add1 i))
                 'error))
@@ -430,7 +433,8 @@
 ; matches one character that `ok?` accepts
 (define (char-where ok?)
   (parser
-   (lambda (s i)
+   (lambda (in i)
+     (define s (input-text in))
      (if (and (< i (string-length s)) (ok? (string-ref s i)))
          (matched (string (string-ref s i)) (add1 i))
          'error))))
@@ -440,17 +444,24 @@
               'error)
 (check-equal? ((seq (lit "1") (star (char-where char-alphabetic?))) "1ab2")
               (result (list "1" (list "a" "b")) "2"))
-(check-equal? (run (lit "b") "ab" 1)
+(check-equal? (positions:run (lit "b") "ab" 1)
               (matched "b" 2))
-(check-equal? (run (lit "b") "ab" 0)
+(check-equal? (positions:run (lit "b") "ab" 0)
               'error)
-(check-equal? (run (lambda (s) (result s (substring s 1))) "abc" 1)
+(check-equal? (positions:run (lambda (s) (result s (substring s 1))) "abc" 1)
               (matched "bc" 2))
-; A parser made with `parser` is given the input itself, not a copy.
+(check-exn exn:fail:contract? (λ () (positions:run (lit "b") 'ab 0)))
+; The library's Runs don't check their input, so the Run a program gets
+; does.
+(check-equal? ((positions:parser-run (lit "b")) "ab" 1)
+              (matched "b" 2))
+(check-exn exn:fail:contract? (λ () ((positions:parser-run (lit "b")) 'ab 0)))
+; A parser made with `parser` is given the input's text itself, not a
+; copy.
 (define seen #f)
 (define spy
-  (parser (lambda (s i)
-            (set! seen (cons s i))
+  (parser (lambda (in i)
+            (set! seen (cons (input-text in) i))
             (matched '() i))))
 (define spied "ab!")
 (check-equal? (begin ((seq (lit "ab") spy) spied)

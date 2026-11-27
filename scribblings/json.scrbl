@@ -88,12 +88,13 @@ JSON is parsed in two stages. @racket[json-lexer] splits the text into
  and strings. They parse characters rather than tokens, so they're used
  on a string directly.
 
-@defthing[json-lexer (-> string? any/c)]{
- produces the input to @racket[parse] a string with @racket[VALUE],
- @racket[ARRAY], @racket[OBJECT], or @racket[PAIR]. It reads the
- string's tokens as the parser asks for them, skipping any whitespace
- before each, which is any of @racket[#\space], @racket[#\tab],
- @racket[#\newline], and @racket[#\return].
+@defthing[json-lexer (-> string? input?)]{
+ produces an @tech{Input} of a string, with JSON's lexer, to
+ @racket[parse] with @racket[VALUE], @racket[ARRAY], @racket[OBJECT], or
+ @racket[PAIR]. It reads the string's tokens as the parser asks for
+ them, skipping any whitespace before each, which is any of
+ @racket[#\space], @racket[#\tab], @racket[#\newline], and
+ @racket[#\return].
 
 @examples[#:eval json-eval
 (parse VALUE (json-lexer "  null "))

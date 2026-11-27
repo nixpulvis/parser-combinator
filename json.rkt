@@ -191,7 +191,7 @@
 (define CODE-UNIT
   (parser
    (lambda (in i)
-     (define s (input-string in))
+     (define s (input-text in))
      (let ([end (+ i 4)])
        (if (<= end (string-length s))
            (let loop ([j i] [n 0])

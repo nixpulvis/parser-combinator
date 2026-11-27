@@ -29,7 +29,7 @@
 (check-exn #rx"unexpected comma" (λ () (parse (tok 'number) (json-lexer "1,"))))
 ; A Parser applied to Tokens leaves the rest of them.
 (check-equal? (let ([r ((tok 'number) (json-lexer "1 2"))])
-                (list (result-value r) (tokens json-lexer (lexed-string (result-remaining r)))))
+                (list (result-value r) (tokens json-lexer (input-text (result-remaining r)))))
               (list 1 (list (token 'number 2 1 2))))
 
 ; Rules are tried in order, and the first to match wins, not the longest,
@@ -96,6 +96,40 @@
 ; json.rkt's STRING is a character parser, so it works over Tokens too.
 (check-equal? (parse (seq (tok 'ident) (lit ":") STRING) (names "k:\"\\u0041\""))
               '("k" ":" "A"))
+; So does a plain-function parser, given the rest of the text.
+(define (AT s)
+  (if (and (> (string-length s) 0) (char=? (string-ref s 0) #\@))
+      (result "@" (substring s 1))
+      'error))
+(check-equal? (parse (seq (tok 'ident) AT (tok 'ident)) (names "a@b"))
+              '("a" "@" "b"))
+(check-exn exn:fail? (λ () (parse (seq (tok 'ident) AT (tok 'ident)) (names "a @b"))))
+; And a parser with a Run written by hand, which reads the text with
+; input-text and passes its Input on to run, so Tokens work inside it.
+(define (twice p)
+  (parser (lambda (in i)
+            (let ([m (run p in i)])
+              (if (symbol? m)
+                  'error
+                  (let ([m2 (run p in (matched-end m))])
+                    (if (symbol? m2)
+                        'error
+                        (matched (list (matched-value m) (matched-value m2))
+                                 (matched-end m2)))))))))
+(check-equal? (parse (twice (tok 'ident)) (names " a  b ")) '("a" "b"))
+(define AT-RUN
+  (parser (lambda (in i)
+            (let ([s (input-text in)])
+              (if (and (< i (string-length s)) (char=? (string-ref s i) #\@))
+                  (matched "@" (add1 i))
+                  'error)))))
+(check-equal? (parse (seq (tok 'ident) AT-RUN (tok 'ident)) (names "a@b"))
+              '("a" "@" "b"))
+; A grammar over Tokens given a String, with no lexer, says it needs one.
+(check-exn #rx"tok: the input has no lexer" (λ () (parse VALUE "null")))
+(check-exn #rx"tok: the input has no lexer" (λ () ((tok 'ident) "a")))
+; A lexer that doesn't make an Input is caught before any Run reads it.
+(check-exn exn:fail:contract? (λ () (parse (with-lexer (λ (s) 'oops) (lit "a")) "a")))
 ; with-lexer goes the other way: a grammar over characters uses one over
 ; Tokens for part of its text.
 (define setting
