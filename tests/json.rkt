@@ -45,6 +45,11 @@
               'error)
 (check-equal? (STRING "\"\\u12")
               'error)
+; It fails at the first character that isn't a hexadecimal digit.
+(check-exn #rx"unexpected text \"G4\\\\\"\" at line 1, column 6"
+           (λ () (parse STRING "\"\\u12G4\"")))
+(check-exn #rx"unexpected end of input at line 1, column 6"
+           (λ () (parse STRING "\"\\u12")))
 (check-exn exn:fail? (λ () (parse STRING "\"tab\there\"")))
 (check-exn exn:fail? (λ () (parse STRING "\"nul\u0000\"")))
 (check-exn exn:fail? (λ () (parse STRING "\"us\u001F\"")))

@@ -88,7 +88,10 @@
 (define address (seq (tok 'ident) (lit "@") (tok 'ident)))
 (check-equal? (parse address (names "a@b")) '("a" "@" "b"))
 (check-equal? (parse address (names " a@ b ")) '("a" "@" "b"))
-(check-exn exn:fail? (λ () (parse address (names "a @b"))))
+; A character parser's failure counts toward where the parse got
+; furthest, so it's reported there, at what comes next.
+(check-exn #rx"unexpected text \"@b\" at line 1, column 3"
+           (λ () (parse address (names "a @b"))))
 ; alt tries a character parser whatever the next Token is, even where
 ; no Token begins.
 (check-equal? (parse (star (alt (tok 'ident) (lit "#"))) (names "a#b#"))
@@ -136,6 +139,9 @@
   (seq (span "abcdefghijklmnopqrstuvwxyz") (lit "=") (with-lexer json-lexer VALUE)))
 (check-equal? (parse setting "a=[1, {\"b\" : null} ]") '("a" "=" (1 #hasheq((b . null)))))
 (check-exn exn:fail? (λ () (parse setting "a =[1]")))
+; How far the grammar over Tokens got counts toward how far the parse got.
+(check-exn #rx"unexpected text \" 2]\" at line 1, column 5"
+           (λ () (parse setting "a=[1 2]")))
 ; Or a grammar over Tokens uses another lexer's.
 (check-equal? (parse (seq (tok 'ident) (with-lexer json-lexer VALUE)) (names "x [1, 2]"))
               '("x" (1 2)))

@@ -21,8 +21,10 @@
  applies @Parser @racket[p] to the @Input @racket[in] and produces the
  resulting @|Value|.
  Unlike applying @racket[p] directly, @racket[parse] demands that
- @racket[p] consume all of @racket[in]. It raises
- @racket[exn:fail] if @racket[p] fails or leaves text over.
+ @racket[p] consume all of @racket[in]. It raises @racket[exn:fail] if
+ @racket[p] fails or leaves text over, saying what it found where the
+ parse got furthest, by line and column: the furthest that any parser
+ failed at, or that @racket[p]'s match ended at.
 
 @examples[#:eval parse-eval
 (parse (lit "hi") "hi")
@@ -516,7 +518,11 @@ A @Run matches its input's text starting at the given position, and
  @racket[alt] can't tell which characters the matches of such a parser
  start with, so it always tries it. When they all start with the same
  text, match that text with a @racket[lit] first, and write a @Run for
- the rest.}
+ the rest.
+
+ When its @Run fails, it fails where it was run, as far as
+ @racket[parse]'s error is concerned, unless the @Run says where with
+ @racket[fail].}
 
 @defproc[(parser? [v any/c]) boolean?]{
  returns @racket[#t] if @racket[v] was made by @racket[parser], or by
@@ -529,13 +535,39 @@ A @Run matches its input's text starting at the given position, and
  produces the text of @racket[in], which a @Run matches from the
  position it's given. It returns the text itself, without copying it.}
 
+@defproc[(fail [in input?] [i exact-nonnegative-integer?]) 'error]{
+ produces @racket['error] for a @Run to fail with, and records that the
+ parse got to position @racket[i] of @racket[in]. If the parse fails
+ and gets no further, @racket[parse]'s error points there, as it does
+ for the library's own parsers. This lets a @Run point at the bad
+ character instead of where it started.
+
+@examples[#:eval positions-eval
+(code:comment "Parser")
+(code:comment "matches two digits")
+(define TWO-DIGITS
+  (parser
+   (lambda (in i)
+     (define s (input-text in))
+     (let loop ([j i])
+       (cond [(= j (+ i 2))
+              (matched (substring s i j) j)]
+             [(and (< j (string-length s))
+                   (char-numeric? (string-ref s j)))
+              (loop (add1 j))]
+             [else (fail in j)])))))
+(parse TWO-DIGITS "42")
+(eval:error (parse TWO-DIGITS "4x"))
+]}
+
 @defproc[(run [p #,Parser] [in #,Input] [i exact-nonnegative-integer?])
          (or/c 'error matched?)]{
  runs @racket[p] on @racket[in] from position @racket[i], producing a
  @|Match|. If @racket[p] is a @racket[parser], this calls its @|Run|.
  Otherwise @racket[p] is a plain function, and it is applied to a copy
- of @racket[in]'s text from @racket[i] on. A @Run uses @racket[run] to
- run other parsers, passing its own input.
+ of @racket[in]'s text from @racket[i] on. It can't say where it fails,
+ so it fails at @racket[i]. A @Run uses @racket[run] to run other
+ parsers, passing its own input.
 
 @examples[#:eval positions-eval
 (code:comment "Parser -> Parser")

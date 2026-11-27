@@ -9,7 +9,8 @@
 (require (prefix-in positions: (only-in (submod "../parse.rkt" positions)
                                         parser
                                         parser-run
-                                        run)))
+                                        run
+                                        fail)))
 
 ; String ... -> [Exn -> Boolean]
 ; Whether an exception's message is the `parts` joined together.
@@ -470,6 +471,21 @@
 (check-equal? (object-name (positions:parser (lambda (in i) 'error) 'NAMED))
               'NAMED)
 (check-equal? (object-name (positions:parser (lambda (in i) 'error))) #f)
+; A Run written by hand fails where it was run, or where it says with
+; `fail`, so a parse that fails there is reported there. So does a
+; plain-function parser.
+(check-exn (message-is "parse: unexpected text \"c\" at line 1, column 3")
+           (λ () (parse (seq (lit "ab") (positions:parser (lambda (in i) 'error)))
+                        "abc")))
+(check-exn (message-is "parse: unexpected text \"d\" at line 1, column 4")
+           (λ () (parse (seq (lit "ab")
+                             (positions:parser (lambda (in i) (positions:fail in (add1 i)))))
+                        "abcd")))
+(check-exn (message-is "parse: unexpected text \"c\" at line 1, column 3")
+           (λ () (parse (seq (lit "ab") (lambda (s) 'error)) "abc")))
+(check-equal? (positions:fail "ab" 1) 'error)
+(check-exn exn:fail:contract? (λ () (positions:fail 'ab 1)))
+(check-exn exn:fail:contract? (λ () (positions:fail "ab" -1)))
 ; A plain-function parser can't give back more text than it was given.
 (define (GROW s)
   (result 'g (string-append "zz" s)))
@@ -485,7 +501,25 @@
 
 ; parse tests
 (check-equal? (parse (emp) "") '())
-(check-exn (message-is "bad input, got error")
+; A failed parse says what it found where it got furthest, by line and
+; column: where a parser failed, or where the match ended.
+(check-exn (message-is "parse: unexpected text \"b\" at line 1, column 1")
            (λ () (parse (lit "a") "b")))
-(check-exn (message-is "bad input, had leftover text \"{}\"")
+(check-exn (message-is "parse: unexpected text \"{}\" at line 1, column 1")
            (λ () (parse (emp) "{}")))
+(check-exn (message-is "parse: unexpected text \"gh\" at line 1, column 3")
+           (λ () (parse (lit "hi") "high")))
+(check-exn (message-is "parse: unexpected text \"p\" at line 1, column 4")
+           (λ () (parse (lit "hello") "help")))
+(check-exn (message-is "parse: unexpected end of input at line 1, column 2")
+           (λ () (parse (lit "ab") "a")))
+(check-exn (message-is "parse: unexpected text \"d\" at line 1, column 3")
+           (λ () (parse (seq (lit "a") (opt (lit "bc"))) "abd")))
+(check-exn (message-is "parse: unexpected text \"c\" at line 2, column 1")
+           (λ () (parse (seq (lit "a\n") (lit "b")) "a\nc")))
+(check-exn (message-is "parse: unexpected text \"x\" at line 1, column 2")
+           (λ () (parse (seq (lit "a") (alt (lit "b") (lit "c"))) "ax")))
+(define-parser NESTED
+  (star (unwrap (lit "(") NESTED (lit ")"))))
+(check-exn (message-is "parse: unexpected end of input at line 1, column 4")
+           (λ () (parse NESTED "(()")))

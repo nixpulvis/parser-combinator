@@ -70,6 +70,8 @@
            kind-name
            kind-count
            unsafe-source-text
+           fail!
+           reach!
            parser
            parser?
            parser-run
@@ -118,12 +120,12 @@
   ;   matches there
   ; - `match` is its lexer rule's Match, with its value and where it
   ;   ends, which `tok` produces as it is, or 'error
-  ; - `furthest` is the furthest position a Token was asked for at,
-  ;   which is about where a failed parse failed
+  ; - `furthest` is the furthest position a parser failed at, or a Token
+  ;   was asked for at, which is about where a failed parse failed
   ; Only what parsing needs is kept, so where a Token begins, and what's
   ; at `furthest`, are scanned again when they're needed.
   (require (only-in racket/vector vector-append)
-           (only-in racket/unsafe/ops unsafe-struct*-ref))
+           (only-in racket/unsafe/ops unsafe-struct*-ref unsafe-struct*-set!))
   ; It's authentic and sealed, so checking that a value is a Source,
   ; which every access to it does, is one comparison.
   ; NOTE: That gains 1.05x speed in the canada.json and citm_catalog.json
@@ -259,6 +261,20 @@
   (define-syntax-rule (unsafe-source-text in)
     (unsafe-struct*-ref in 0))
 
+  ; (reach! in i) : Void
+  ; Notes that the parse got to position `i` of `in`, which is where it
+  ; got furthest if it's past the Source's `furthest`, its seventh field.
+  ; Like `unsafe-source-text`, it doesn't check that `in` is a Source.
+  (define-syntax-rule (reach! in i)
+    (let ([in* in] [i* i])
+      (when (> i* (unsafe-struct*-ref in* 6))
+        (unsafe-struct*-set! in* 6 i*))))
+
+  ; (fail! in i) : 'error
+  ; Fails at position `i` of `in`, noting that the parse got there.
+  (define-syntax-rule (fail! in i)
+    (begin (reach! in i) 'error))
+
   ; A Parser is an [Input -> Result]
   ; that matches a prefix of its Input's text. The Result's `remaining`
   ; is the rest of it, a String given a String, or else a Source of the
@@ -312,16 +328,17 @@
   ; Parser Source Natural -> Match
   ; Runs any Parser from position `i` of `in`. A Parser that is a plain
   ; function is applied to a copy of the rest of the text, so it matches
-  ; characters, whatever the Source's lexer. Only the length of its
-  ; `remaining` is used, to find where its match ended, so it raises an
-  ; error if `remaining` is longer than that copy.
+  ; characters, whatever the Source's lexer. It can't say where it fails,
+  ; so it fails at `i`. Only the length of its `remaining` is used, to
+  ; find where its match ended, so it raises an error if `remaining` is
+  ; longer than that copy.
   (define (run p in i)
     (if (parser? p)
         ((parser-run p) in i)
         (let* ([s (source-text in)]
                [text (substring s i)]
                [r (p text)])
-          (cond [(symbol? r) 'error]
+          (cond [(symbol? r) (fail! in i)]
                 [(> (string-length (result-remaining r)) (string-length text))
                  (raise-arguments-error
                   'run
@@ -410,7 +427,8 @@
            parser?
            (rename-out [checked-parser-run parser-run])
            (rename-out [run-input run])
-           input-text)
+           input-text
+           fail)
 
   (require (rename-in (submod ".." private) [parser parser-with-start]))
 
@@ -419,12 +437,34 @@
   ; Makes a parser from a Run written by hand, with the name #f, or the
   ; given one. Its Run reads the text with (input-text in), and passes
   ; `in` on to `run` as it is, so it works in a grammar over Tokens as
-  ; well as one over characters. `alt` always tries it, since it can't
-  ; tell what such a parser begins with.
+  ; well as one over characters. When it fails, it fails where it was
+  ; run, unless it says where with `fail`, as the library's parsers do.
+  ; `alt` always tries it, since it can't tell what such a parser begins
+  ; with.
   (define-syntax parser
     (syntax-rules ()
-      [(_ run) (parser-with-start run)]
-      [(_ run name) (parser-with-start run #f name)]))
+      [(_ run) (parser-with-start (failing-where-run run))]
+      [(_ run name) (parser-with-start (failing-where-run run) #f name)]))
+
+  ; (failing-where-run run) : Run
+  ; The Run `run`, but where it fails, it fails at the position it was
+  ; run from, so a parse that fails there is reported there.
+  (define-syntax-rule (failing-where-run run)
+    (let ([r run])
+      (lambda (in i)
+        (let ([m (r in i)])
+          (if (symbol? m) (fail! in i) m)))))
+
+  ; Input Natural -> 'error
+  ; Fails at position `i` of `in`, so that if the parse fails, and gets
+  ; no further than `i`, its error is reported there. A String has
+  ; nowhere to note it.
+  (define (fail in i)
+    (unless (input? in)
+      (raise-argument-error 'fail "input?" 0 in i))
+    (unless (exact-nonnegative-integer? i)
+      (raise-argument-error 'fail "exact-nonnegative-integer?" 1 in i))
+    (if (string? in) 'error (fail! in i)))
 
   ; Parser Input Natural -> Match
   ; Runs `p` from position `i` of `in`, as the library's `run` does, but
@@ -445,31 +485,38 @@
 (require 'private)
 
 ; Parser Input -> Value
+; The Value `p` produces from all of `x`. Otherwise it raises an error
+; saying what it found where the parse got furthest: where a parser
+; failed, a Token was asked for, or the match ended, whichever is
+; furthest along. Checking for 'eof after a match asks for the Token
+; after it, so over Tokens, that's at least where the match ended.
 (define (parse p x)
   (let* ([in (->source 'parse x)]
-         [m (run p in 0)]
-         [s (source-text in)])
-    (if (eq? (source-scanner in) no-lexer)
-        (cond [(symbol? m)
-               (error "bad input, got error")]
-              [(< (matched-end m) (string-length s))
-               (error "bad input, had leftover text"
-                      (substring s (matched-end m)))]
-              [else
-               (matched-value m)])
-        ; A failure is reported at the furthest position a Token was asked
-        ; for at. When a match left Tokens over, checking for 'eof asked
-        ; for the one after it, so that's at least where the match ended.
-        (if (and (matched? m) (eq? (peek! in (matched-end m)) 'eof))
-            (matched-value m)
-            (let*-values ([(id at) (next-kind+start in (source-furthest in))]
-                          [(line column) (line+column s at)])
-              (error 'parse "unexpected ~a at line ~a, column ~a"
-                     (case (kind-name id)
-                       [(eof) "end of input"]
-                       [(#f) (format "text ~s" (substring s at (min (string-length s) (+ at 10))))]
-                       [else (kind-name id)])
-                     line column))))))
+         [m (run p in 0)])
+    (if (and (matched? m)
+             (if (eq? (source-scanner in) no-lexer)
+                 (= (matched-end m) (string-length (source-text in)))
+                 (eq? (peek! in (matched-end m)) 'eof)))
+        (matched-value m)
+        (raise-unexpected in (max (if (matched? m) (matched-end m) 0)
+                                  (source-furthest in))))))
+
+; Source Natural -> (raise exn:fail)
+; Raises the error `parse` does, for what's at position `i` of `in`: the
+; Token there, or with no lexer, the text.
+(define (raise-unexpected in i)
+  (let*-values ([(s) (source-text in)]
+                [(kind at) (if (eq? (source-scanner in) no-lexer)
+                               (values (and (= i (string-length s)) 'eof) i)
+                               (let-values ([(id at) (next-kind+start in i)])
+                                 (values (kind-name id) at)))]
+                [(line column) (line+column s at)])
+    (error 'parse "unexpected ~a at line ~a, column ~a"
+           (case kind
+             [(eof) "end of input"]
+             [(#f) (format "text ~s" (substring s at (min (string-length s) (+ at 10))))]
+             [else kind])
+           line column)))
 
 ; (once x expr)
 ; The value of the variable `x`, which is #f until this first sets it to
@@ -516,13 +563,12 @@
     (parser
      (lambda (in i)
        (define s (unsafe-source-text in))
-       (if (and (<= (+ i len) (string-length s))
-                (let loop ([k 0])
-                  (or (= k len)
-                      (and (char=? (string-ref str k) (string-ref s (+ i k)))
-                           (loop (add1 k))))))
-           (matched str (+ i len))
-           'error))
+       (let loop ([k 0])
+         (cond [(= k len) (matched str (+ i len))]
+               [(and (< (+ i k) (string-length s))
+                     (char=? (string-ref str k) (string-ref s (+ i k))))
+                (loop (add1 k))]
+               [else (fail! in (+ i k))])))
      (if (= len 0)
          (start '() #t)
          (start (list (string-ref str 0)) #f)))))
@@ -540,7 +586,7 @@
        (let ([m (regexp-match-positions anchored s i)])
          (if m
              (matched (substring s i (cdar m)) (cdar m))
-             'error))))))
+             (fail! in i)))))))
 
 ; (or/c [Char -> Any] String) -> Parser
 ; Matches the longest run of one or more characters that `ok?` accepts,
@@ -548,9 +594,9 @@
 ; per match, so it suits runs that are often short, like whitespace.
 (define (span ok?)
   (parser
-   (scan ok? (s i j)
+   (scan ok? (in s i j)
      (if (= j i)
-         'error
+         (fail! in i)
          (matched (substring s i j) j)))
    (and (string? ok?) (start (string->list ok?) #f))))
 
@@ -559,17 +605,18 @@
 ; rather than copying them, for text a grammar only skips over.
 (define (skip ok?)
   (parser
-   (scan ok? (s i j)
+   (scan ok? (in s i j)
      (matched '() j))
    (and (string? ok?) (start (string->list ok?) #t))))
 
-; (scan ok? (s i j) body) : Run
+; (scan ok? (in s i j) body) : Run
 ; Makes a Run that finds where the run of characters that `ok?` accepts,
-; or that are in it, ends, from position `i` of `s`, and then evaluates
-; `body` with that position as `j`. Given a String, its ASCII characters
-; are looked up in a table. The loop is written out in each Run, not
-; called, so a Run that skips nothing costs no more than a check.
-(define-syntax-rule (scan ok? (s i j) body)
+; or that are in it, ends, from position `i` of the text `s` of `in`,
+; and then evaluates `body` with that position as `j`. Given a String,
+; its ASCII characters are looked up in a table. The loop is written out
+; in each Run, not called, so a Run that skips nothing costs no more than
+; a check.
+(define-syntax-rule (scan ok? (in s i j) body)
   (if (string? ok?)
       (let-values ([(ascii others) (char-table ok?)])
         (lambda (in i)
@@ -791,9 +838,10 @@
             otherwise)))))
 
 ; [Listof Parser] -> Run
-; Matches what the first of `ps` to match does.
+; Matches what the first of `ps` to match does. With none, it fails
+; where it's run, as `alt` does where no alternative can begin.
 (define (first-of ps)
-  (cond [(null? ps) (lambda (in i) 'error)]
+  (cond [(null? ps) (lambda (in i) (fail! in i))]
         [(and (null? (cdr ps)) (parser? (car ps))) (parser-run (car ps))]
         [else (lambda (in i)
                 (let loop ([ps ps])

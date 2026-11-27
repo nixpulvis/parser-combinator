@@ -187,19 +187,18 @@
 ; Parser
 ; Matches the four hexadecimal digits of a `\u` escape, producing the
 ; UTF-16 code unit they name as a Natural. It has a Run of its own, since
-; `span` can't match a fixed number of characters.
+; `span` can't match a fixed number of characters, and fails where a
+; digit is missing, at the first character that isn't one.
 (define CODE-UNIT
   (parser
    (lambda (in i)
      (define s (input-text in))
      (let ([end (+ i 4)])
-       (if (<= end (string-length s))
-           (let loop ([j i] [n 0])
-             (cond [(= j end) (matched n j)]
-                   [(hex-digit (string-ref s j))
-                    => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
-                   [else 'error]))
-           'error)))))
+       (let loop ([j i] [n 0])
+         (cond [(= j end) (matched n j)]
+               [(and (< j (string-length s)) (hex-digit (string-ref s j)))
+                => (lambda (d) (loop (add1 j) (+ (* n 16) d)))]
+               [else (fail in j)]))))))
 
 ; Char -> [Maybe Natural]
 ; The value of `c` as a hexadecimal digit, or #f if it isn't one.

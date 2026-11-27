@@ -2,9 +2,10 @@
 (require (only-in "parse.rkt" [skip skip-chars])
          (only-in (submod "parse.rkt" private)
                   [parser parser-with-start] token struct:token token? token-kind token-value
-                  token-start token-end source-text source-match make-source kept-value
-                  kept-start kept-end peek! peek-id! ->source run parser? parser-run matched
-                  matched-end start start-of start-chars start-empty? kind-id line+column))
+                  token-start token-end source-text source-match source-furthest make-source
+                  kept-value kept-start kept-end peek! peek-id! ->source reach! run parser?
+                  parser-run matched matched-end start start-of start-chars start-empty?
+                  kind-id line+column))
 
 (provide lexer
          tok
@@ -152,13 +153,17 @@
 ; its text, such as a JSON value after a key in a config file, and a
 ; grammar over Tokens use another lexer's for part of its own, such as
 ; the code inside a string. Positions are the same in either, so `p`
-; picks up where the grammar around it is, and it, where `p` ends.
+; picks up where the grammar around it is, and that grammar picks up
+; where `p` ends. How far `p` got counts toward how far the parse got.
 ; Nothing is known about what `p` begins with in characters, so `alt`
 ; always tries it.
 (define (with-lexer lex p)
   (parser-with-start
    (lambda (in i)
-     (run p (->source 'with-lexer (lex (source-text in))) i))
+     (let* ([inner (->source 'with-lexer (lex (source-text in)))]
+            [m (run p inner i)])
+       (reach! in (source-furthest inner))
+       m))
    #f))
 
 ; Parser -> Run
