@@ -184,16 +184,19 @@
               'null)
 (check-equal? (parse VALUE (json-lexer " \t[ 1 ,\n2 ]\r\n"))
               (list 1 2))
-; Each of them takes a string too, lexing it with json-lexer itself, and
-; whitespace after the value as well as before it.
-(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
+; Each of them takes a string too, lexing it with json-lexer itself. The
+; whitespace before the value belongs to its first Token; that after it
+; is left over, as in any grammar over characters.
+(check-equal? (parse VALUE " \t[ 1 ,\n2 ]")
               (list 1 2))
-(check-equal? (parse ARRAY " [1, 2] ")
+(check-equal? (parse ARRAY " [1, 2]")
               (list 1 2))
-(check-equal? (parse OBJECT "{\"a\": 1} ")
+(check-equal? (parse OBJECT "{\"a\": 1}")
               (hasheq 'a 1))
-(check-equal? (parse PAIR "\"a\" : true ")
+(check-equal? (parse PAIR "\"a\" : true")
               (cons 'a #t))
+(check-exn #rx"unexpected text \" \" at line 1, column 4"
+           (λ () (parse VALUE "[1] ")))
 (check-exn #rx"unexpected comma at line 1, column 4"
            (λ () (parse ARRAY "[1,,2]")))
 

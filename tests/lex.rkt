@@ -146,9 +146,11 @@
   (seq (span "abcdefghijklmnopqrstuvwxyz") (lit "=") (with-lexer json-lexer JSON-VALUE)))
 (check-equal? (parse setting "a=[1, {\"b\" : null} ]") '("a" "=" (1 #hasheq((b . null)))))
 (check-exn exn:fail? (λ () (parse setting "a =[1]")))
-; After the match, it matches what its lexer skips, so the grammar around
-; it isn't left the lexer's whitespace.
-(check-equal? (parse (seq setting (lit ";")) "a=[1] ;") '(("a" "=" (1)) ";"))
+; What its lexer skips belongs to the Token after it, so the whitespace
+; after the match is left to the grammar around it.
+(check-equal? (parse (seq setting (lit " ;")) "a=[1] ;") '(("a" "=" (1)) " ;"))
+(check-exn #rx"unexpected text \" ;\" at line 1, column 6"
+           (λ () (parse (seq setting (lit ";")) "a=[1] ;")))
 ; Where the parse got furthest in the grammar over Tokens, the error says
 ; it in Tokens.
 (check-exn #rx"unexpected number at line 1, column 6"
@@ -157,5 +159,5 @@
 (check-equal? (parse (seq (tok 'ident) (with-lexer json-lexer JSON-VALUE)) (names "x [1, 2]"))
               '("x" (1 2)))
 ; JSON's VALUE brings json-lexer with it, so it works in any grammar.
-(check-equal? (parse (seq (lit "a=") VALUE (lit ";")) "a= [1] ;") '("a=" (1) ";"))
+(check-equal? (parse (seq (lit "a=") VALUE (lit ";")) "a= [1];") '("a=" (1) ";"))
 (check-equal? (parse (seq (tok 'ident) VALUE) (names "x [1]")) '("x" (1)))

@@ -3,10 +3,9 @@
          (only-in (submod "parse.rkt" private)
                   [parser parser-with-start] token struct:token token? token-kind token-value
                   token-start token-end source-text source-match source-scanner make-source
-                  kept-value kept-start kept-end next-kind+start keep-inner! no-lexer peek!
-                  peek-id! ->source reach! run parser? parser-run matched matched? matched-value
-                  matched-end start start-of start-chars start-empty? kind-id end-kind
-                  raise-unexpected))
+                  kept-value kept-start kept-end keep-inner! peek! peek-id! ->source run parser?
+                  parser-run matched matched-end start start-of start-chars start-empty?
+                  kind-id end-kind raise-unexpected))
 
 (provide lexer
          tok
@@ -176,14 +175,13 @@
 ; grammar over Tokens use another lexer's for part of its own, such as
 ; the code inside a string. Positions are the same in either, so `p`
 ; picks up where the grammar around it is, and that grammar picks up
-; where `p` ends.
+; where `p`'s match ends. What `lex` skips belongs to the Token after
+; it, so `p` takes what's skipped before its Tokens, and none after.
 ;
 ; Given a Source of `lex`'s own, `p` runs over it as it is. Otherwise
 ; `p` runs over a Source of `lex`'s, which is kept, so where the parse
-; got furthest inside it is said in its Tokens, and after `p`'s match it
-; matches what `lex` skips, as it does before each Token, so the grammar
-; around it isn't left `lex`'s whitespace. Nothing is known about what
-; `p` begins with in characters, so `alt` always tries it.
+; got furthest inside it is said in its Tokens. Nothing is known about
+; what `p` begins with in characters, so `alt` always tries it.
 (define (with-lexer lex p)
   (unless (procedure? lex)
     (raise-argument-error 'with-lexer "(-> string? input?)" lex))
@@ -197,11 +195,7 @@
            (let* ([inner (->source 'with-lexer (lex (source-text in)))]
                   [m (run p inner i)])
              (keep-inner! in inner)
-             (if (and (matched? m) (not (eq? (source-scanner inner) no-lexer)))
-                 (let-values ([(id j) (next-kind+start inner (matched-end m))])
-                   (reach! inner j)
-                   (matched (matched-value m) j))
-                 m))))
+             m)))
      #f)))
 
 ; Lexer String -> [Listof Token]

@@ -89,16 +89,16 @@ A @Lexer makes an @Input of a string, whose tokens a grammar over
  produces a @Parser that matches what @racket[p] does, over the tokens
  that @racket[lex] finds from where it's run. It lets a grammar over
  characters use one over tokens for part of its text, or a grammar over
- tokens use another lexer's. After @racket[p]'s match, it also matches
- what @racket[lex] skips, as it does before each token, so the grammar
- around it isn't left @racket[lex]'s whitespace. Where the parse gets
- furthest inside @racket[p], @racket[parse]'s error says it in
+ tokens use another lexer's. What @racket[lex] skips belongs to the
+ token after it, so @racket[p] takes what's skipped before its tokens,
+ and leaves what follows its match to the grammar around it. Where the
+ parse gets furthest inside @racket[p], @racket[parse]'s error says it in
  @racket[lex]'s tokens. Given an @Input that @racket[lex] made,
  @racket[p] simply runs over its tokens.
 
 @examples[#:eval lex-eval
 (parse (seq (lit "sum=") (with-lexer sums SUM) (lit ";"))
-       "sum=1 + 2 ;")
+       "sum=1 + 2;")
 (eval:error (parse (seq (lit "sum=") (with-lexer sums SUM))
                    "sum=1 2"))
 ]}

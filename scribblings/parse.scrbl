@@ -429,15 +429,32 @@ PARENS
 
 @defmodule[(submod parser-combinator/parse positions) #:packages ("parser-combinator")]
 
-The parsers made by @racketmodname[parser-combinator/parse] each hold a
- @Run, which matches the input from a position, and call each other's
- @|Run|s rather than copying the input. This module provides those
- pieces, for a parser that can't be built from the combinators, such as
- one whose grammar depends on what it has already matched.
+Every @Parser is made either by the combinators above, or by
+ @racket[parser], out of a @Run written by hand. Prefer the combinators.
+ They know what each parser can begin with, so @racket[alt] can skip
+ alternatives that can't match, and they record where they fail, for
+ @racket[parse]'s errors. Write a @Run for what the combinators can't
+ express, such as a fixed count of characters, a grammar that depends
+ on what it already matched, or a tight loop over characters.
 
-A @Run reads its @Input's text with @racket[input-text], and passes the
- @Input on to @racket[run] as it is, so a parser written with this
- module works in a grammar over tokens, as well as one over characters.
+A @Run is given an @Input and a position in its text, and matches from
+ that position. A @Run that follows these rules works like the
+ combinators, in any grammar:
+@itemlist[
+ @item{It reads the text with @racket[input-text]. The @Input may be a
+ lexer's, so it isn't necessarily a string.}
+ @item{It produces @racket[(matched _value _end)], where @racket[_end]
+ is the position just after its match, or @racket['error].}
+ @item{It runs other parsers with @racket[run], passing its own @Input
+ and a position, so they work over tokens as well as characters.}
+ @item{When the text is wrong, it fails with @racket[fail] at the bad
+ position, so @racket[parse]'s error points there. Producing
+ @racket['error] instead fails at the position the @Run started from.}
+]
+
+@racket[alt] can't tell what a @Run begins with, so it always tries
+ it. If all its matches begin with the same text, match that text with
+ a @racket[lit] first, and write the @Run for the rest.
 
 @deftech{Match} : @racket[(or/c 'error matched?)]
 
@@ -495,16 +512,7 @@ A @Run matches its input's text starting at the given position, and
  @racket[parser] is a form, not a function, so it can't be passed to
  @racket[apply] or used as a value. A form makes the parser where its
  @Run is written, so Racket's compiler can see the @Run, which makes
- parsing faster.
-
- @racket[alt] can't tell which characters the matches of such a parser
- start with, so it always tries it. When they all start with the same
- text, match that text with a @racket[lit] first, and write a @Run for
- the rest.
-
- When its @Run fails, it fails where it was run, as far as
- @racket[parse]'s error is concerned, unless the @Run says where with
- @racket[fail].}
+ parsing faster.}
 
 @defproc[(parser? [v any/c]) boolean?]{
  returns @racket[#t] if @racket[v] is a @|Parser|: one made by

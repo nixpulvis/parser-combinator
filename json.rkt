@@ -32,8 +32,11 @@
 ; wins. This is the shape Racket's `json` library uses for objects.
 
 ; String -> JSON
+; A JSON text is a value with whitespace around it. Over `json-lexer`'s
+; Source, the whitespace before the value belongs to its first Token, and
+; that after it to the end of the text, which `parse` asks for.
 (define (string->json str)
-  (parse VALUE str))
+  (parse VALUE (json-lexer str)))
 
 ; -------------------------------------
 ; ----- JSON Context Free Grammar -----
@@ -46,8 +49,9 @@
 ; VALUE, ARRAY, OBJECT and PAIR are that grammar, each with `json-lexer`
 ; around it, so they take a String, or the Source `json-lexer` makes, or
 ; work in any other grammar, of characters or of another lexer's Tokens.
-; The grammar itself, over JSON's Tokens alone, is provided by the
-; `tokens` submodule.
+; Like any Token, the first takes the whitespace before it, and the
+; whitespace after the last is left to what comes next. The grammar
+; itself, over JSON's Tokens alone, is provided by the `tokens` submodule.
 
 (define-parser VALUE (with-lexer json-lexer JSON-VALUE))
 (define-parser ARRAY (with-lexer json-lexer JSON-ARRAY))

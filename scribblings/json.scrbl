@@ -56,7 +56,7 @@ An empty JSON array is @racket['()] and an empty JSON object is
  parses @racket[str] as a JSON value, ignoring whitespace around it. It
  raises @racket[exn:fail] if @racket[str] is not valid JSON, saying what
  it found where it stopped. It is the same as
- @racket[(parse VALUE str)].
+ @racket[(parse VALUE (json-lexer str))].
 
 @examples[#:eval json-eval
 (string->json "[]")
@@ -78,19 +78,26 @@ An empty JSON array is @racket['()] and an empty JSON object is
 @section[#:tag "json-grammar"]{Grammar}
 
 JSON is parsed in two stages. @racket[json-lexer] splits the text into
- tokens, such as a number, a string, or a comma, and drops the
- whitespace between them. A grammar over those tokens then parses them,
- and the parsers below are that grammar, each with @racket[json-lexer]
- around it, as with @racket[with-lexer]: @racket[ARRAY] and
- @racket[OBJECT] for those kinds of value, @racket[PAIR] for one name
- and value in an object, and @racket[VALUE] for any JSON value. So they
- parse a string, or what @racket[json-lexer] makes, and they work inside
- any other grammar, which they leave after the whitespace that follows
- them.
+ tokens, such as numbers, strings, and commas, and drops the whitespace
+ between them. A grammar over those tokens then parses them. The
+ parsers below are that grammar, each wrapped in @racket[json-lexer]
+ as with @racket[with-lexer]: @racket[ARRAY] and @racket[OBJECT] for
+ those kinds of value, @racket[PAIR] for one name and value in an
+ object, and @racket[VALUE] for any JSON value. They parse either a
+ string or what @racket[json-lexer] makes, and they work inside any
+ other grammar.
+
+Whitespace belongs to the token after it. A value takes the whitespace
+ before it, and leaves what follows to the surrounding grammar. At the
+ end of what @racket[json-lexer] makes, the end of the text counts as a
+ token, so @racket[parse] consumes the whitespace before it. That is how
+ @racket[string->json] allows whitespace after a value.
 
 @examples[#:eval json-eval
-(parse VALUE "  null ")
-(parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2] ;")
+(parse VALUE "  null")
+(parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2];")
+(eval:error (parse VALUE "null "))
+(parse VALUE (json-lexer "  null "))
 (eval:error (parse VALUE "[1 2]"))
 ]
 
