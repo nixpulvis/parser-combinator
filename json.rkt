@@ -33,7 +33,7 @@
 
 ; String -> JSON
 (define (string->json str)
-  (parse VALUE (json-lexer str)))
+  (parse VALUE str))
 
 ; -------------------------------------
 ; ----- JSON Context Free Grammar -----
@@ -42,42 +42,59 @@
 ; JSON is parsed in two stages: `json-lexer`, at the end of this file,
 ; turns the text into Tokens, and the grammar below parses the Tokens.
 ; Only the lexer knows about whitespace, so the grammar never mentions it.
+;
+; VALUE, ARRAY, OBJECT and PAIR are that grammar, each with `json-lexer`
+; around it, so they take a String, or the Source `json-lexer` makes, or
+; work in any other grammar, of characters or of another lexer's Tokens.
+; The grammar itself, over JSON's Tokens alone, is provided by the
+; `tokens` submodule.
+
+(define-parser VALUE (with-lexer json-lexer JSON-VALUE))
+(define-parser ARRAY (with-lexer json-lexer JSON-ARRAY))
+(define-parser OBJECT (with-lexer json-lexer JSON-OBJECT))
+(define-parser PAIR (with-lexer json-lexer JSON-PAIR))
+
+(module+ tokens
+  (provide JSON-VALUE
+           JSON-ARRAY
+           JSON-OBJECT
+           JSON-PAIR))
 
 ; Parser
 ; Each kind of value begins with its own kind of Token, so `alt` runs
 ; only the parser for the kind the next Token is, rather than trying each
 ; in turn.
-(define-parser VALUE
+(define-parser JSON-VALUE
   (alt (tok 'null)
        (tok 'true)
        (tok 'false)
        (tok 'number)
        (tok 'string)
-       ARRAY
-       OBJECT))
+       JSON-ARRAY
+       JSON-OBJECT))
 
 ; Parser
-(define-parser ARRAY
+(define-parser JSON-ARRAY
   (unwrap (tok 'begin-array)
-          (sep-by* VALUE (tok 'comma))
+          (sep-by* JSON-VALUE (tok 'comma))
           (tok 'end-array)))
 
 ; Parser
-(define-parser OBJECT
+(define-parser JSON-OBJECT
   (pmap (lambda (open pairs close)
           (for/hasheq ([pair (in-list pairs)])
             (values (car pair) (cdr pair))))
         (tok 'begin-object)
-        (sep-by* PAIR (tok 'comma))
+        (sep-by* JSON-PAIR (tok 'comma))
         (tok 'end-object)))
 
 ; Parser
-(define-parser PAIR
+(define-parser JSON-PAIR
   (pmap (lambda (name colon value)
           (cons (string->symbol name) value))
         (tok 'string)
         (tok 'colon)
-        VALUE))
+        JSON-VALUE))
 
 ; -------------------------------
 ; ----- Numbers and Strings -----

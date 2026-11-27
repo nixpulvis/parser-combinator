@@ -8,7 +8,6 @@
 ; takes a Start, and its `run` takes a String too.
 (require (prefix-in positions: (only-in (submod "../parse.rkt" positions)
                                         parser
-                                        parser-run
                                         run
                                         fail)))
 
@@ -421,13 +420,19 @@
   (check-equal? ((sep-by+ (lit "a") (lit ",")) s)
                 ((pmap cons (lit "a") (star (preceded (lit ",") (lit "a")))) s)))
 
-; plain function parsers
-; A plain function is given the rest of the input, and its `remaining`
-; tells the combinators where its match ended.
-(check-equal? ((seq (lit "ab") (lambda (s) (result s (substring s 1)))) "abcd")
-              (result (list "ab" "cd") "d"))
-(check-equal? ((seq (lit "a") (lambda (s) 'error)) "ab")
-              'error)
+; A parser is made by the combinators, or by `parser` from a Run, and a
+; combinator given anything else says so when it's made.
+(for ([make (list (λ (q) (seq (lit "a") q))
+                  (λ (q) (alt q))
+                  (λ (q) (star q))
+                  (λ (q) (pmap values q))
+                  (λ (q) (where values q))
+                  (λ (q) (sep-by* q (lit ",")))
+                  (λ (q) (unwrap (lit "(") q (lit ")"))))])
+  (check-exn exn:fail:contract? (λ () (make (lambda (s) 'error)))))
+(check-exn exn:fail:contract? (λ () (parse (lambda (s) 'error) "a")))
+(define-parser NOT-A-PARSER "a")
+(check-exn #rx"NOT-A-PARSER: contract violation" (λ () (parse NOT-A-PARSER "a")))
 
 ; positions tests
 ; Char-Predicate -> Parser
@@ -449,14 +454,8 @@
               (matched "b" 2))
 (check-equal? (positions:run (lit "b") "ab" 0)
               'error)
-(check-equal? (positions:run (lambda (s) (result s (substring s 1))) "abc" 1)
-              (matched "bc" 2))
 (check-exn exn:fail:contract? (λ () (positions:run (lit "b") 'ab 0)))
-; The library's Runs don't check their input, so the Run a program gets
-; does.
-(check-equal? ((positions:parser-run (lit "b")) "ab" 1)
-              (matched "b" 2))
-(check-exn exn:fail:contract? (λ () ((positions:parser-run (lit "b")) 'ab 0)))
+(check-exn exn:fail:contract? (λ () (positions:run (lambda (s) 'error) "ab" 0)))
 ; A parser made with `parser` is given the input's text itself, not a
 ; copy.
 (define seen #f)
@@ -472,8 +471,7 @@
               'NAMED)
 (check-equal? (object-name (positions:parser (lambda (in i) 'error))) #f)
 ; A Run written by hand fails where it was run, or where it says with
-; `fail`, so a parse that fails there is reported there. So does a
-; plain-function parser.
+; `fail`, so a parse that fails there is reported there.
 (check-exn (message-is "parse: unexpected text \"c\" at line 1, column 3")
            (λ () (parse (seq (lit "ab") (positions:parser (lambda (in i) 'error)))
                         "abc")))
@@ -481,23 +479,9 @@
            (λ () (parse (seq (lit "ab")
                              (positions:parser (lambda (in i) (positions:fail in (add1 i)))))
                         "abcd")))
-(check-exn (message-is "parse: unexpected text \"c\" at line 1, column 3")
-           (λ () (parse (seq (lit "ab") (lambda (s) 'error)) "abc")))
 (check-equal? (positions:fail "ab" 1) 'error)
 (check-exn exn:fail:contract? (λ () (positions:fail 'ab 1)))
 (check-exn exn:fail:contract? (λ () (positions:fail "ab" -1)))
-; A plain-function parser can't give back more text than it was given.
-(define (GROW s)
-  (result 'g (string-append "zz" s)))
-(check-exn (message-is "run: parser's remaining is longer than its input\n"
-                       "  parser: #<procedure:GROW>\n"
-                       "  input: \"bc\"\n"
-                       "  remaining: \"zzbc\"")
-           (λ () ((unwrap (lit "a") GROW (lit "c")) "abc")))
-(define (BACK-ONE s)
-  (result 'b (string-append "x" s)))
-(check-exn exn:fail:contract?
-           (λ () ((unwrap (lit "a") BACK-ONE (lit "a")) "ab")))
 
 ; parse tests
 (check-equal? (parse (emp) "") '())
@@ -511,6 +495,10 @@
            (λ () (parse (lit "hi") "high")))
 (check-exn (message-is "parse: unexpected text \"p\" at line 1, column 4")
            (λ () (parse (lit "hello") "help")))
+; where fails where its parser began, where the Value it rejects is.
+(check-exn (message-is "parse: unexpected text \"300\" at line 1, column 3")
+           (λ () (parse (seq (lit "x=") (where byte? (pmap string->number (rx #px"\\d+"))))
+                        "x=300")))
 (check-exn (message-is "parse: unexpected end of input at line 1, column 2")
            (λ () (parse (lit "ab") "a")))
 (check-exn (message-is "parse: unexpected text \"d\" at line 1, column 3")

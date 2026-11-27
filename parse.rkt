@@ -54,6 +54,10 @@
            (struct-out matched)
            (struct-out token)
            line+column
+           end-kind
+           raise-unexpected
+           source-reach
+           keep-inner!
            (struct-out source)
            input?
            input-text
@@ -116,12 +120,14 @@
   ; Token's kind, and the alternative it picks asks again for the same
   ; Token. So no Token is made, and each is usually scanned once.
   ; - `at` is the position the kept Token was asked for at, or #f
-  ; - `kind` is its Kind ID, that of 'eof at the end, or #f if nothing
+  ; - `kind` is its Kind ID, that of `end-kind` at the end, or #f if nothing
   ;   matches there
   ; - `match` is its lexer rule's Match, with its value and where it
   ;   ends, which `tok` produces as it is, or 'error
   ; - `furthest` is the furthest position a parser failed at, or a Token
   ;   was asked for at, which is about where a failed parse failed
+  ; - `inner` is the Source that `with-lexer` made, of another lexer, and
+  ;   ran its parser over, that got furthest, or #f
   ; Only what parsing needs is kept, so where a Token begins, and what's
   ; at `furthest`, are scanned again when they're needed.
   (require (only-in racket/vector vector-append)
@@ -132,7 +138,7 @@
   ; benches, over a plain struct.
   (struct source (text scanner chars
                   [at #:mutable] [kind #:mutable] [match #:mutable]
-                  [furthest #:mutable])
+                  [furthest #:mutable] [inner #:mutable])
     #:constructor-name raw-source
     #:authentic #:sealed)
 
@@ -158,12 +164,34 @@
   ; How many kinds have IDs.
   (define (kind-count) (hash-count kind-ids))
 
+  ; Symbol
+  ; The kind of the Token at the end of the text. It's uninterned, so no
+  ; lexer rule's kind is it, whatever the rule is named.
+  (define end-kind (string->uninterned-symbol "end"))
+
   ; String Scanner -> Source
   (define (make-source s scanner)
     (raw-source s scanner
                 (and (not (eq? scanner no-lexer))
-                     (raw-source s no-lexer #f #f #f 'error 0))
-                #f #f 'error 0))
+                     (raw-source s no-lexer #f #f #f 'error 0 #f))
+                #f #f 'error 0 #f))
+
+  ; Source -> Natural
+  ; The furthest position the parse got to in `in`, or in a Source that
+  ; `with-lexer` made of the same text from it.
+  (define (source-reach in)
+    (let ([inner (source-inner in)])
+      (if inner
+          (max (source-furthest in) (source-reach inner))
+          (source-furthest in))))
+
+  ; Source Source -> Void
+  ; Keeps `inner`, which `with-lexer` made of the text of `in`, if the
+  ; parse got further in it than in the inner Source `in` keeps.
+  (define (keep-inner! in inner)
+    (let ([kept (source-inner in)])
+      (when (or (not kept) (> (source-reach inner) (source-reach kept)))
+        (set-source-inner! in inner))))
 
   ; Scanner
   ; The Scanner of a Source with no lexer. Only a grammar over Tokens
@@ -198,6 +226,27 @@
       (if (char=? c #\newline)
           (values (add1 line) 1)
           (values line (add1 column)))))
+
+  ; Symbol Source Natural -> (raise exn:fail)
+  ; Raises an error for `who`, saying what's at position `i` of `in`: the
+  ; Token there, or with no lexer, the text, by line and column. Where
+  ; the parse got there in an inner Source, and no further in `in`, it's
+  ; said as the inner Source's lexer sees it.
+  (define (raise-unexpected who in i)
+    (let ([inner (source-inner in)])
+      (if (and inner (>= (source-reach inner) i))
+          (raise-unexpected who inner i)
+          (let*-values ([(s) (source-text in)]
+                        [(kind at) (if (eq? (source-scanner in) no-lexer)
+                                       (values (and (= i (string-length s)) end-kind) i)
+                                       (let-values ([(id at) (next-kind+start in i)])
+                                         (values (kind-name id) at)))]
+                        [(line column) (line+column s at)])
+            (error who "unexpected ~a at line ~a, column ~a"
+                   (cond [(eq? kind end-kind) "end of input"]
+                         [(not kind) (format "text ~s" (substring s at (min (string-length s) (+ at 10))))]
+                         [else kind])
+                   line column)))))
 
   ; Source Natural -> (values (or/c Natural #f) Natural)
   ; The Kind ID of the Token after position `i`, and where it begins,
@@ -326,30 +375,9 @@
       [(_ run st name) #'(make-parser run st name)]))
 
   ; Parser Source Natural -> Match
-  ; Runs any Parser from position `i` of `in`. A Parser that is a plain
-  ; function is applied to a copy of the rest of the text, so it matches
-  ; characters, whatever the Source's lexer. It can't say where it fails,
-  ; so it fails at `i`. Only the length of its `remaining` is used, to
-  ; find where its match ended, so it raises an error if `remaining` is
-  ; longer than that copy.
+  ; Runs `p` from position `i` of `in`.
   (define (run p in i)
-    (if (parser? p)
-        ((parser-run p) in i)
-        (let* ([s (source-text in)]
-               [text (substring s i)]
-               [r (p text)])
-          (cond [(symbol? r) (fail! in i)]
-                [(> (string-length (result-remaining r)) (string-length text))
-                 (raise-arguments-error
-                  'run
-                  "parser's remaining is longer than its input"
-                  "parser" p
-                  "input" text
-                  "remaining" (result-remaining r))]
-                [else
-                 (matched (result-value r)
-                          (- (string-length s)
-                             (string-length (result-remaining r))))]))))
+    ((parser-run p) in i))
 
   ; A Start says which characters, or which kinds of Token, a parser's
   ; matches can begin with. It is one of:
@@ -362,28 +390,26 @@
   ; like `emp`, and (start '() #f) of one that never matches.
   (struct start (chars empty?))
 
-  ; Any -> Start
-  ; The Start of `p`. A plain function's Start is #f, and so is that of a
-  ; parser with a Run written by hand. A grammar refers to parsers that
-  ; aren't defined yet, so a combinator gives its Start as a thunk, which
-  ; is called the first time the Start is needed and replaced by what it
-  ; returns. While a Start is being worked out it's #f, so a grammar that
-  ; refers to itself doesn't loop, and a Start worked out from it in the
-  ; meantime keeps #f. That only turns `alt`'s dispatch off for that
-  ; parser, so the tests check the JSON grammar's Starts.
+  ; Parser -> Start
+  ; The Start of `p`. That of a parser with a Run written by hand is #f.
+  ; A grammar refers to parsers that aren't defined yet, so a combinator
+  ; gives its Start as a thunk, which is called the first time the Start
+  ; is needed and replaced by what it returns. While a Start is being
+  ; worked out it's #f, so a grammar that refers to itself doesn't loop,
+  ; and a Start worked out from it in the meantime keeps #f. That only
+  ; turns `alt`'s dispatch off for that parser, so the tests check the
+  ; JSON grammar's Starts.
   ; NOTE: Mutation gains 1.15x speed in the escapes bench, over keeping a
   ; thunk's Start in a promise made when the parser is.
   (define (start-of p)
-    (if (parser? p)
-        (let ([st (parser-start p)])
-          (if (procedure? st)
-              (begin
-                (set-parser-start! p #f)
-                (let ([st (st)])
-                  (set-parser-start! p st)
-                  st))
+    (let ([st (parser-start p)])
+      (if (procedure? st)
+          (begin
+            (set-parser-start! p #f)
+            (let ([st (st)])
+              (set-parser-start! p st)
               st))
-        #f))
+          st)))
 
   ; The Starts of the combinators are made from their parsers' with
   ; these three.
@@ -425,7 +451,6 @@
            (struct-out matched)
            parser
            parser?
-           (rename-out [checked-parser-run parser-run])
            (rename-out [run-input run])
            input-text
            fail)
@@ -468,55 +493,40 @@
 
   ; Parser Input Natural -> Match
   ; Runs `p` from position `i` of `in`, as the library's `run` does, but
-  ; takes any Input, not only a Source, so a Run can be tried on text
-  ; directly.
+  ; checks its arguments, and takes any Input, not only a Source, so a
+  ; Run can be tried on text directly.
   (define (run-input p in i)
-    (run p (->source 'run in) i))
-
-  ; parser? -> [Input Natural -> Match]
-  ; The Run of `p`, which takes any Input, as `run-input` does. The
-  ; library's Runs don't check their input, so one given to a program
-  ; does.
-  (define (checked-parser-run p)
-    (let ([r (parser-run p)])
-      (lambda (in i)
-        (r (->source 'parser-run in) i)))))
+    (unless (parser? p)
+      (raise-argument-error 'run "parser?" 0 p in i))
+    (run p (->source 'run in) i)))
 
 (require 'private)
+
+; Symbol Any ... -> Void
+; Raises an error for `who` unless each of `ps` is a Parser, so a grammar
+; that uses something else fails when it's made, not when it runs.
+(define (check-parsers who . ps)
+  (for ([p (in-list ps)])
+    (unless (parser? p)
+      (raise-argument-error who "parser?" p))))
 
 ; Parser Input -> Value
 ; The Value `p` produces from all of `x`. Otherwise it raises an error
 ; saying what it found where the parse got furthest: where a parser
 ; failed, a Token was asked for, or the match ended, whichever is
-; furthest along. Checking for 'eof after a match asks for the Token
+; furthest along. Checking for the end after a match asks for the Token
 ; after it, so over Tokens, that's at least where the match ended.
 (define (parse p x)
+  (check-parsers 'parse p)
   (let* ([in (->source 'parse x)]
          [m (run p in 0)])
     (if (and (matched? m)
              (if (eq? (source-scanner in) no-lexer)
                  (= (matched-end m) (string-length (source-text in)))
-                 (eq? (peek! in (matched-end m)) 'eof)))
+                 (eq? (peek! in (matched-end m)) end-kind)))
         (matched-value m)
-        (raise-unexpected in (max (if (matched? m) (matched-end m) 0)
-                                  (source-furthest in))))))
-
-; Source Natural -> (raise exn:fail)
-; Raises the error `parse` does, for what's at position `i` of `in`: the
-; Token there, or with no lexer, the text.
-(define (raise-unexpected in i)
-  (let*-values ([(s) (source-text in)]
-                [(kind at) (if (eq? (source-scanner in) no-lexer)
-                               (values (and (= i (string-length s)) 'eof) i)
-                               (let-values ([(id at) (next-kind+start in i)])
-                                 (values (kind-name id) at)))]
-                [(line column) (line+column s at)])
-    (error 'parse "unexpected ~a at line ~a, column ~a"
-           (case kind
-             [(eof) "end of input"]
-             [(#f) (format "text ~s" (substring s at (min (string-length s) (+ at 10))))]
-             [else kind])
-           line column)))
+        (raise-unexpected 'parse in (max (if (matched? m) (matched-end m) 0)
+                                         (source-reach in))))))
 
 ; (once x expr)
 ; The value of the variable `x`, which is #f until this first sets it to
@@ -537,7 +547,10 @@
 (define-syntax-rule (define-parser name body)
   (define name
     (let ([p #f]
-          [build (lambda () body)])
+          [build (lambda ()
+                   (let ([q body])
+                     (check-parsers 'name q)
+                     q))])
       (parser (lambda (in i)
                 (run (once p (build)) in i))
               (lambda ()
@@ -652,6 +665,7 @@
 ; converts that parser's Value. Unless `f` accepts that many arguments,
 ; it raises an error when the parser is made, before any input is parsed.
 (define (pmap f p . ps)
+  (apply check-parsers 'pmap p ps)
   (let* ([ps (cons p ps)] [n (length ps)])
     (unless (and (procedure? f) (procedure-arity-includes? f n))
       (raise-argument-error 'pmap (format "(procedure-arity-includes/c ~a)" n) f))
@@ -762,6 +776,7 @@
 ; they can't match the next character, or the next Token, so when each
 ; alternative begins with its own, it runs only one of them.
 (define (alt . ps)
+  (apply check-parsers 'alt ps)
   (let ([choose #f])
     (parser
      (lambda (in i)
@@ -842,7 +857,7 @@
 ; where it's run, as `alt` does where no alternative can begin.
 (define (first-of ps)
   (cond [(null? ps) (lambda (in i) (fail! in i))]
-        [(and (null? (cdr ps)) (parser? (car ps))) (parser-run (car ps))]
+        [(null? (cdr ps)) (parser-run (car ps))]
         [else (lambda (in i)
                 (let loop ([ps ps])
                   (if (null? ps)
@@ -861,6 +876,7 @@
 ; otherwise repeat forever. The matches are collected in a loop, so a
 ; long repetition doesn't nest a parser call per match.
 (define (star p)
+  (check-parsers 'star p)
   (parser
    (lambda (in i)
      (let loop ([i i] [acc '()])
@@ -872,11 +888,15 @@
 
 ; [Value -> Any] Parser -> Parser
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
+; Otherwise it fails where `p` began, where the Value it rejected is.
 (define (where ok? p)
+  (check-parsers 'where p)
   (parser
    (lambda (in i)
      (let ([m (run p in i)])
-       (if (and (matched? m) (ok? (matched-value m))) m 'error)))
+       (cond [(not (matched? m)) m]
+             [(ok? (matched-value m)) m]
+             [else (fail! in i)])))
    (lambda () (start-of p))))
 
 ; The combinators below are made from the kernel's.
@@ -885,40 +905,48 @@
 ; Runs the parsers in order, as `pmap` does, and produces the list of
 ; their Values.
 (define (seq p . ps)
+  (apply check-parsers 'seq p ps)
   (apply pmap list p ps))
 
 ; Parser -> Parser
 ; Parser Value -> Parser
 ; Matches what `p` matches, or else nothing, producing `default`.
 (define (opt p [default '()])
+  (check-parsers 'opt p)
   (alt p (emp default)))
 
 ; Parser -> Parser
 (define (plus p)
+  (check-parsers 'plus p)
   (pmap cons p (star p)))
 
 ; Parser Parser Parser -> Parser
 (define (unwrap left body right)
+  (check-parsers 'unwrap left body right)
   (pmap (lambda (l b r) b) left body right))
 
 ; Parser Parser -> Parser
 ; Matches `skipped` and then `p`, producing `p`'s Value.
 (define (preceded skipped p)
+  (check-parsers 'preceded skipped p)
   (pmap (lambda (_ v) v) skipped p))
 
 ; Parser Parser -> Parser
 ; Matches `p` and then `skipped`, producing `p`'s Value.
 (define (terminated p skipped)
+  (check-parsers 'terminated p skipped)
   (pmap (lambda (v _) v) p skipped))
 
 ; Parser Parser -> Parser
 ; Matches one or more `p`s with a `sep` between each, producing the
 ; list of the `p`s' Values.
 (define (sep-by+ p sep)
+  (check-parsers 'sep-by+ p sep)
   (pmap cons p (star (preceded sep p))))
 
 ; Parser Parser -> Parser
 ; Matches zero or more `p`s with a `sep` between each, as `sep-by+`
 ; does, or else nothing, producing '().
 (define (sep-by* p sep)
+  (check-parsers 'sep-by* p sep)
   (opt (sep-by+ p sep)))

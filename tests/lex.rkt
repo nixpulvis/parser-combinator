@@ -3,10 +3,11 @@
          "../parse.rkt"
          "../lex.rkt"
          "../json.rkt"
+         (submod "../json.rkt" tokens)
          (submod "../parse.rkt" private))
 
-; These use json.rkt's lexer and grammar as a grammar over Tokens, and its
-; NUMBER and STRING as parsers over characters to mix with them.
+; These use json.rkt's lexer and its grammar over Tokens, and its NUMBER
+; and STRING as parsers over characters to mix with them.
 
 ; line+column tests
 (check-equal? (call-with-values (λ () (line+column "ab\ncd" 0)) list) '(1 1))
@@ -50,6 +51,20 @@
               '("if" "iffy" "x"))
 (check-exn exn:fail? (λ () (parse (seq (tok 'ident "if") (tok 'ident))
                                   (idents "iffy x"))))
+; Any symbol can be a kind, even one that reads like the end of the text.
+(define ends
+  (lexer #:skip " "
+         [eof (lit "end")]
+         [ident (span "abcdefghijklmnopqrstuvwxyz")]))
+(check-equal? (map token-kind (tokens ends "ab end")) '(ident eof))
+(check-equal? (parse (seq (tok 'ident) (tok 'eof)) (ends "ab end")) '("ab" "end"))
+(check-exn #rx"unexpected end of input at line 1, column 3"
+           (λ () (parse (seq (tok 'ident) (tok 'eof)) (ends "ab"))))
+; Without #:skip, a lexer skips nothing.
+(define bare (lexer [a (lit "a")]))
+(check-equal? (map token-kind (tokens bare "aa")) '(a a))
+(check-exn #rx"tokens: unexpected text \" a\" at line 1, column 2"
+           (λ () (tokens bare "a a")))
 
 ; The grammar never sees whitespace, so a lexer that also drops comments
 ; parses JSON with comments with the same grammar.
@@ -67,7 +82,7 @@
          [false (pmap (const #f) (lit "false"))]
          [number NUMBER]
          [string STRING]))
-(check-equal? (parse VALUE (jsonc-lexer "// a list\n[1, // one\n 2]\n// done"))
+(check-equal? (parse JSON-VALUE (jsonc-lexer "// a list\n[1, // one\n 2]\n// done"))
               '(1 2))
 
 ; Given a String, a lexer skips its characters, ASCII or not.
@@ -99,14 +114,6 @@
 ; json.rkt's STRING is a character parser, so it works over Tokens too.
 (check-equal? (parse (seq (tok 'ident) (lit ":") STRING) (names "k:\"\\u0041\""))
               '("k" ":" "A"))
-; So does a plain-function parser, given the rest of the text.
-(define (AT s)
-  (if (and (> (string-length s) 0) (char=? (string-ref s 0) #\@))
-      (result "@" (substring s 1))
-      'error))
-(check-equal? (parse (seq (tok 'ident) AT (tok 'ident)) (names "a@b"))
-              '("a" "@" "b"))
-(check-exn exn:fail? (λ () (parse (seq (tok 'ident) AT (tok 'ident)) (names "a @b"))))
 ; And a parser with a Run written by hand, which reads the text with
 ; input-text and passes its Input on to run, so Tokens work inside it.
 (define (twice p)
@@ -129,19 +136,26 @@
 (check-equal? (parse (seq (tok 'ident) AT-RUN (tok 'ident)) (names "a@b"))
               '("a" "@" "b"))
 ; A grammar over Tokens given a String, with no lexer, says it needs one.
-(check-exn #rx"tok: the input has no lexer" (λ () (parse VALUE "null")))
+(check-exn #rx"tok: the input has no lexer" (λ () (parse JSON-VALUE "null")))
 (check-exn #rx"tok: the input has no lexer" (λ () ((tok 'ident) "a")))
 ; A lexer that doesn't make an Input is caught before any Run reads it.
 (check-exn exn:fail:contract? (λ () (parse (with-lexer (λ (s) 'oops) (lit "a")) "a")))
 ; with-lexer goes the other way: a grammar over characters uses one over
 ; Tokens for part of its text.
 (define setting
-  (seq (span "abcdefghijklmnopqrstuvwxyz") (lit "=") (with-lexer json-lexer VALUE)))
+  (seq (span "abcdefghijklmnopqrstuvwxyz") (lit "=") (with-lexer json-lexer JSON-VALUE)))
 (check-equal? (parse setting "a=[1, {\"b\" : null} ]") '("a" "=" (1 #hasheq((b . null)))))
 (check-exn exn:fail? (λ () (parse setting "a =[1]")))
-; How far the grammar over Tokens got counts toward how far the parse got.
-(check-exn #rx"unexpected text \" 2]\" at line 1, column 5"
+; After the match, it matches what its lexer skips, so the grammar around
+; it isn't left the lexer's whitespace.
+(check-equal? (parse (seq setting (lit ";")) "a=[1] ;") '(("a" "=" (1)) ";"))
+; Where the parse got furthest in the grammar over Tokens, the error says
+; it in Tokens.
+(check-exn #rx"unexpected number at line 1, column 6"
            (λ () (parse setting "a=[1 2]")))
 ; Or a grammar over Tokens uses another lexer's.
-(check-equal? (parse (seq (tok 'ident) (with-lexer json-lexer VALUE)) (names "x [1, 2]"))
+(check-equal? (parse (seq (tok 'ident) (with-lexer json-lexer JSON-VALUE)) (names "x [1, 2]"))
               '("x" (1 2)))
+; JSON's VALUE brings json-lexer with it, so it works in any grammar.
+(check-equal? (parse (seq (lit "a=") VALUE (lit ";")) "a= [1] ;") '("a=" (1) ";"))
+(check-equal? (parse (seq (tok 'ident) VALUE) (names "x [1]")) '("x" (1)))

@@ -5,6 +5,7 @@
 (require "../parse.rkt")
 (require (only-in "../lex.rkt" tokens))
 (require "../json.rkt")
+(require (submod "../json.rkt" tokens))
 (require (submod "../parse.rkt" private))
 
 ; STRING tests
@@ -112,7 +113,8 @@
                     (token 'colon ":" 5 6)
                     (token 'null 'null 6 10)
                     (token 'end-object "}" 10 11)))
-(check-exn #rx"no token matches at line 2, column 4" (λ () (tokens json-lexer "[1,\n 2 @]")))
+(check-exn #rx"tokens: unexpected text \"@]\" at line 2, column 4"
+           (λ () (tokens json-lexer "[1,\n 2 @]")))
 
 ; PAIR tests
 (check-equal? (parse PAIR (json-lexer "\"\":\"\""))
@@ -182,6 +184,18 @@
               'null)
 (check-equal? (parse VALUE (json-lexer " \t[ 1 ,\n2 ]\r\n"))
               (list 1 2))
+; Each of them takes a string too, lexing it with json-lexer itself, and
+; whitespace after the value as well as before it.
+(check-equal? (parse VALUE " \t[ 1 ,\n2 ]\r\n")
+              (list 1 2))
+(check-equal? (parse ARRAY " [1, 2] ")
+              (list 1 2))
+(check-equal? (parse OBJECT "{\"a\": 1} ")
+              (hasheq 'a 1))
+(check-equal? (parse PAIR "\"a\" : true ")
+              (cons 'a #t))
+(check-exn #rx"unexpected comma at line 1, column 4"
+           (λ () (parse ARRAY "[1,,2]")))
 
 ; Error tests
 ; A failed parse says what it found where it stopped.
@@ -199,9 +213,9 @@
 
 ; Start tests
 ; Each kind of value begins with its own kind of Token, and each Token
-; with its own characters, so VALUE's alt runs only one of them, and so
-; does the lexer's. A grammar change that loses a Start turns that off
-; without changing what parses, so these check them.
+; with its own characters, so JSON-VALUE's alt runs only one of them,
+; and so does the lexer's. A grammar change that loses a Start turns
+; that off without changing what parses, so these check them.
 ; Parser -> (list String Boolean)
 (define (start-string p)
   (let ([st (start-of p)])
@@ -212,11 +226,11 @@
   (let ([st (start-of p)])
     (and st (list (sort (remove-duplicates (start-chars st)) symbol<?)
                   (start-empty? st)))))
-(check-equal? (start-kinds VALUE)
+(check-equal? (start-kinds JSON-VALUE)
               (list '(begin-array begin-object false null number string true) #f))
-(check-equal? (start-kinds ARRAY) (list '(begin-array) #f))
-(check-equal? (start-kinds OBJECT) (list '(begin-object) #f))
-(check-equal? (start-kinds PAIR) (list '(string) #f))
+(check-equal? (start-kinds JSON-ARRAY) (list '(begin-array) #f))
+(check-equal? (start-kinds JSON-OBJECT) (list '(begin-object) #f))
+(check-equal? (start-kinds JSON-PAIR) (list '(string) #f))
 (check-equal? (start-string NUMBER) (list "-0123456789" #f))
 (check-equal? (start-string STRING) (list "\"" #f))
 

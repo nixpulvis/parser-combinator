@@ -2,10 +2,11 @@
 (require (only-in "parse.rkt" [skip skip-chars])
          (only-in (submod "parse.rkt" private)
                   [parser parser-with-start] token struct:token token? token-kind token-value
-                  token-start token-end source-text source-match source-furthest make-source
-                  kept-value kept-start kept-end peek! peek-id! ->source reach! run parser?
-                  parser-run matched matched-end start start-of start-chars start-empty?
-                  kind-id line+column))
+                  token-start token-end source-text source-match source-scanner make-source
+                  kept-value kept-start kept-end next-kind+start keep-inner! no-lexer peek!
+                  peek-id! ->source reach! run parser? parser-run matched matched? matched-value
+                  matched-end start start-of start-chars start-empty? kind-id end-kind
+                  raise-unexpected))
 
 (provide lexer
          tok
@@ -32,29 +33,50 @@
 
 ; A Token is a (token Symbol Any Natural Natural), from parse.rkt.
 
+; (lexer [kind parser] ...) : Lexer
 ; (lexer #:skip skip [kind parser] ...) : Lexer
 ; Makes a Lexer whose Tokens come after whatever `skip` matches, or,
 ; given a String, after any run of its characters, which is faster.
-; Each Token is matched by the first rule's `parser` that matches, and
-; has that rule's `kind`, and the parser's Value as its value. As in
-; `alt`, the rules are tried in order and the first to match wins, so a
+; Without `skip`, it skips nothing. Each Token is matched by the first
+; rule's `parser` that matches some text, and has that rule's `kind`,
+; and the parser's Value as its value. A rule that matches no text is
+; passed over, since a Token of no text would never end. As in `alt`,
+; the rules are tried in order and the first to match wins, so a
 ; keyword's rule goes before the identifiers' rule, and only the rules
 ; that can begin with the next character are tried.
-(define-syntax-rule (lexer #:skip skip [kind p] ...)
-  (make-lexer skip (list (cons 'kind p) ...)))
+(define-syntax lexer
+  (syntax-rules ()
+    [(_ #:skip skip [kind p] ...)
+     (make-lexer skip (list (cons 'kind p) ...))]
+    [(_ [kind p] ...)
+     (make-lexer "" (list (cons 'kind p) ...))]))
 
 ; (or/c String Parser) [Listof (cons Symbol Parser)] -> Lexer
 (define (make-lexer skip rules)
-  (let ([scanner (make-scanner skip rules)])
-    (lambda (s)
-      (make-source s scanner))))
+  (unless (or (string? skip) (parser? skip))
+    (raise-argument-error 'lexer "(or/c string? parser?)" skip))
+  (for ([r (in-list rules)])
+    (unless (parser? (cdr r))
+      (raise-argument-error 'lexer "parser?" (cdr r))))
+  (scanning-lexer (make-scanner skip rules)))
+
+; A Lexer made by `lexer` is a (scanning-lexer Scanner), applied to a
+; String like a function. `with-lexer` knows a Source it made by its
+; Scanner.
+(struct scanning-lexer (scanner)
+  #:property prop:procedure
+  (lambda (self s)
+    (unless (string? s)
+      (raise-argument-error 'lexer "string?" s))
+    (make-source s (scanning-lexer-scanner self))))
 
 ; (or/c String Parser) [Listof (cons Symbol Parser)] -> Scanner
 ; A Scanner is a [Source Natural -> (values (or/c Natural #f) Natural Match)]
 ; that skips what `skip` matches from position `i` of the Source's text,
 ; and then matches the first of `rules` that matches. It produces that
 ; rule's Kind ID, where its Token begins, and its Match, or the ID of
-; 'eof at the end of the text, or #f and 'error where nothing matches.
+; `end-kind` at the end of the text, or #f and 'error where nothing
+; matches.
 ; Its Source is one with no lexer, since its rules are parsers over
 ; characters.
 ;
@@ -65,7 +87,7 @@
 ; knows which rule matched, so it needn't wrap each rule's Value with its
 ; kind.
 (define (make-scanner skip rules)
-  (let* ([eof (kind-id 'eof)]
+  (let* ([end (kind-id end-kind)]
          ; Given a String, the ASCII characters in it are skipped by a
          ; loop here, as `skip` does, and any others by a `skip` rule.
          [space (if (string? skip)
@@ -91,7 +113,7 @@
                        #:when (or (not st)
                                   (and (car r) (start-empty? st))
                                   (and c (memv c (start-chars st)))))
-              (cons (car r) (as-run (cdr r)))))]
+              (cons (car r) (parser-run (cdr r)))))]
          [otherwise (for-char #f)]
          [ascii (for/vector #:length 128 ([n (in-range 128)])
                   (for-char (integer->char n)))]
@@ -103,7 +125,7 @@
       (let ([s (source-text in)])
         (let next ([i i])
           (if (= i (string-length s))
-              (values eof i 'error)
+              (values end i 'error)
               (let* ([c (string-ref s i)]
                      [n (char->integer c)])
                 (if (and (< n 128) (vector-ref space n))
@@ -154,33 +176,43 @@
 ; grammar over Tokens use another lexer's for part of its own, such as
 ; the code inside a string. Positions are the same in either, so `p`
 ; picks up where the grammar around it is, and that grammar picks up
-; where `p` ends. How far `p` got counts toward how far the parse got.
-; Nothing is known about what `p` begins with in characters, so `alt`
-; always tries it.
+; where `p` ends.
+;
+; Given a Source of `lex`'s own, `p` runs over it as it is. Otherwise
+; `p` runs over a Source of `lex`'s, which is kept, so where the parse
+; got furthest inside it is said in its Tokens, and after `p`'s match it
+; matches what `lex` skips, as it does before each Token, so the grammar
+; around it isn't left `lex`'s whitespace. Nothing is known about what
+; `p` begins with in characters, so `alt` always tries it.
 (define (with-lexer lex p)
-  (parser-with-start
-   (lambda (in i)
-     (let* ([inner (->source 'with-lexer (lex (source-text in)))]
-            [m (run p inner i)])
-       (reach! in (source-furthest inner))
-       m))
-   #f))
-
-; Parser -> Run
-(define (as-run p)
-  (if (parser? p) (parser-run p) (lambda (in i) (run p in i))))
+  (unless (procedure? lex)
+    (raise-argument-error 'with-lexer "(-> string? input?)" lex))
+  (unless (parser? p)
+    (raise-argument-error 'with-lexer "parser?" p))
+  (let ([scanner (and (scanning-lexer? lex) (scanning-lexer-scanner lex))])
+    (parser-with-start
+     (lambda (in i)
+       (if (and scanner (eq? (source-scanner in) scanner))
+           (run p in i)
+           (let* ([inner (->source 'with-lexer (lex (source-text in)))]
+                  [m (run p inner i)])
+             (keep-inner! in inner)
+             (if (and (matched? m) (not (eq? (source-scanner inner) no-lexer)))
+                 (let-values ([(id j) (next-kind+start inner (matched-end m))])
+                   (reach! inner j)
+                   (matched (matched-value m) j))
+                 m))))
+     #f)))
 
 ; Lexer String -> [Listof Token]
 ; The Tokens `lex` finds in `s`, to see what a grammar over them sees. It
-; raises an error where no rule matches.
+; raises an error where no rule matches, as `parse` would there.
 (define (tokens lex s)
   (let ([in (->source 'tokens (lex s))])
     (let loop ([i 0] [acc '()])
       (let ([kind (peek! in i)])
-        (case kind
-          [(eof) (reverse acc)]
-          [(#f) (let-values ([(line column) (line+column s (kept-start in))])
-                  (error 'tokens "no token matches at line ~a, column ~a" line column))]
-          [else (loop (kept-end in)
-                      (cons (token kind (kept-value in) (kept-start in) (kept-end in))
-                            acc))])))))
+        (cond [(eq? kind end-kind) (reverse acc)]
+              [(not kind) (raise-unexpected 'tokens in i)]
+              [else (loop (kept-end in)
+                          (cons (token kind (kept-value in) (kept-start in) (kept-end in))
+                                acc))])))))

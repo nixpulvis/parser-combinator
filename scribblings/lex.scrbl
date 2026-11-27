@@ -30,14 +30,17 @@ The two stages run together: a token is read when the grammar asks for
 A @Lexer makes an @Input of a string, whose tokens a grammar over
  tokens matches.
 
-@defform[(lexer #:skip skip [kind rule] ...)
-         #:contracts ([skip (or/c string? #,Parser)]
-                      [rule #,Parser])]{
+@defform*[((lexer [kind rule] ...)
+           (lexer #:skip skip [kind rule] ...))
+          #:contracts ([skip (or/c string? #,Parser)]
+                       [rule #,Parser])]{
  produces a @|Lexer|. Each token comes after whatever @racket[skip]
  matches, or, when @racket[skip] is a string, after any run of its
- characters, which is faster. A token is matched by the first
- @racket[rule] that matches, and has that rule's @racket[kind], a
- symbol, and the @racket[rule]'s @tech{Value} as its value.
+ characters, which is faster. Without @racket[skip], nothing is skipped.
+ A token is matched by the first @racket[rule] that matches some text,
+ and has that rule's @racket[kind], any symbol, and the @racket[rule]'s
+ @tech{Value} as its value. A rule that matches no text is passed over,
+ since a token must have some; only @racket[skip] can match none.
 
 @examples[#:eval lex-eval
 (define sums
@@ -86,17 +89,24 @@ A @Lexer makes an @Input of a string, whose tokens a grammar over
  produces a @Parser that matches what @racket[p] does, over the tokens
  that @racket[lex] finds from where it's run. It lets a grammar over
  characters use one over tokens for part of its text, or a grammar over
- tokens use another lexer's.
+ tokens use another lexer's. After @racket[p]'s match, it also matches
+ what @racket[lex] skips, as it does before each token, so the grammar
+ around it isn't left @racket[lex]'s whitespace. Where the parse gets
+ furthest inside @racket[p], @racket[parse]'s error says it in
+ @racket[lex]'s tokens. Given an @Input that @racket[lex] made,
+ @racket[p] simply runs over its tokens.
 
 @examples[#:eval lex-eval
-(parse (seq (lit "sum=") (with-lexer sums SUM))
-       "sum=1 + 2")
+(parse (seq (lit "sum=") (with-lexer sums SUM) (lit ";"))
+       "sum=1 + 2 ;")
+(eval:error (parse (seq (lit "sum=") (with-lexer sums SUM))
+                   "sum=1 2"))
 ]}
 
 @defproc[(tokens [lex (-> string? input?)] [str string?]) (listof token?)]{
  produces the tokens that @racket[lex] finds in @racket[str], to show
- what a grammar over them sees. It raises @racket[exn:fail] where no
- rule matches.
+ what a grammar over them sees. Where no rule matches, it raises
+ @racket[exn:fail], saying what's there, as @racket[parse] would.
 
 @examples[#:eval lex-eval
 (tokens sums "1 + 2")

@@ -4,7 +4,8 @@
           (for-label racket/base
                      racket/contract/base
                      parser-combinator/parse
-                     parser-combinator/json))
+                     parser-combinator/json
+                     (only-in parser-combinator/lex with-lexer)))
 
 @(define Value @tech{Value})
 @(define JSON @tech{JSON})
@@ -55,7 +56,7 @@ An empty JSON array is @racket['()] and an empty JSON object is
  parses @racket[str] as a JSON value, ignoring whitespace around it. It
  raises @racket[exn:fail] if @racket[str] is not valid JSON, saying what
  it found where it stopped. It is the same as
- @racket[(parse VALUE (json-lexer str))].
+ @racket[(parse VALUE str)].
 
 @examples[#:eval json-eval
 (string->json "[]")
@@ -78,28 +79,33 @@ An empty JSON array is @racket['()] and an empty JSON object is
 
 JSON is parsed in two stages. @racket[json-lexer] splits the text into
  tokens, such as a number, a string, or a comma, and drops the
- whitespace between them. The grammar behind @racket[string->json] then
- parses the tokens with the parsers below: @racket[ARRAY] and
+ whitespace between them. A grammar over those tokens then parses them,
+ and the parsers below are that grammar, each with @racket[json-lexer]
+ around it, as with @racket[with-lexer]: @racket[ARRAY] and
  @racket[OBJECT] for those kinds of value, @racket[PAIR] for one name
- and value in an object, and @racket[VALUE] for any JSON value. They're
- exported so that programs can use them directly, on what
- @racket[json-lexer] produces.
+ and value in an object, and @racket[VALUE] for any JSON value. So they
+ parse a string, or what @racket[json-lexer] makes, and they work inside
+ any other grammar, which they leave after the whitespace that follows
+ them.
+
+@examples[#:eval json-eval
+(parse VALUE "  null ")
+(parse (seq (lit "x=") VALUE (lit ";")) "x= [1, 2] ;")
+(eval:error (parse VALUE "[1 2]"))
+]
 
 @racket[NUMBER] and @racket[STRING] are the lexer's rules for numbers
- and strings. They parse characters rather than tokens, so they're used
- on a string directly.
+ and strings. They parse characters, not tokens, and match only their
+ own text.
 
 @defthing[json-lexer (-> string? input?)]{
- produces an @tech{Input} of a string, with JSON's lexer, to
- @racket[parse] with @racket[VALUE], @racket[ARRAY], @racket[OBJECT], or
- @racket[PAIR]. It reads the string's tokens as the parser asks for
- them, skipping any whitespace before each, which is any of
- @racket[#\space], @racket[#\tab], @racket[#\newline], and
- @racket[#\return].
+ produces an @tech{Input} of a string, with JSON's lexer. It reads the
+ string's tokens as a parser asks for them, skipping any whitespace
+ before each, which is any of @racket[#\space], @racket[#\tab],
+ @racket[#\newline], and @racket[#\return].
 
 @examples[#:eval json-eval
 (parse VALUE (json-lexer "  null "))
-(eval:error (parse VALUE (json-lexer "[1 2]")))
 ]}
 
 @defthing[VALUE #,Parser]{
@@ -109,7 +115,7 @@ JSON is parsed in two stages. @racket[json-lexer] splits the text into
  produces.
 
 @examples[#:eval json-eval
-(parse VALUE (json-lexer "[1, true]"))
+(parse VALUE "[1, true]")
 ]}
 
 @defthing[NUMBER #,Parser]{
@@ -165,7 +171,7 @@ JSON is parsed in two stages. @racket[json-lexer] splits the text into
  order.
 
 @examples[#:eval json-eval
-(parse ARRAY (json-lexer "[true, false]"))
+(parse ARRAY "[true, false]")
 ]}
 
 @defthing[OBJECT #,Parser]{
@@ -174,9 +180,9 @@ JSON is parsed in two stages. @racket[json-lexer] splits the text into
  @racket[hasheq] from the name of each @racket[PAIR] to its value.
 
 @examples[#:eval json-eval
-(parse OBJECT (json-lexer "{}"))
+(parse OBJECT "{}")
 (code:comment "{\"a\": 1, \"b\": 2}")
-(parse OBJECT (json-lexer "{\"a\": 1, \"b\": 2}"))
+(parse OBJECT "{\"a\": 1, \"b\": 2}")
 ]}
 
 @defthing[PAIR #,Parser]{
@@ -186,5 +192,5 @@ JSON is parsed in two stages. @racket[json-lexer] splits the text into
 
 @examples[#:eval json-eval
 (code:comment "\"a\": true")
-(parse PAIR (json-lexer "\"a\": true"))
+(parse PAIR "\"a\": true")
 ]}
