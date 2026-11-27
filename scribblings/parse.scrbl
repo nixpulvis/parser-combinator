@@ -61,6 +61,18 @@ A @Value is whatever a @Parser produces when it matches. The parsers in
 The functions given to @racket[pmap] are where a grammar builds the data
  the program needs, such as a number, or a structure of its own.
 
+@deftech{Input} : @racket[input?]
+
+An @Input is the text a parser matches: a string, or what a
+ @seclink["lex"]{lexer} such as @racket[json-lexer] makes from one. A
+ lexer's @Input also splits the text into tokens. Parsers over
+ characters, like @racket[lit], work on either kind, and a grammar over
+ tokens needs a lexer's.
+
+@defproc[(input? [v any/c]) boolean?]{
+ returns @racket[#t] if @racket[v] is an @|Input|: a string, or what a
+ lexer makes.}
+
 @deftech{Result} : @racket[(or/c 'error result?)]
 
 A @Result is one of:
@@ -95,18 +107,6 @@ The parsers made by this library pass positions in the input to one
 @defstruct*[result ([value #,Value] [remaining input?]) #:transparent]{
  represents a successful match, as produced by any @Parser that matches.
  See @|Result|.}
-
-@deftech{Input} : @racket[input?]
-
-An @Input is the text a parser matches: a string, or what a lexer
- makes from one, such as @racket[json-lexer], which also splits the text
- into tokens for a grammar over tokens. Parsers over characters, like
- @racket[lit], match the text of either. Only a grammar over tokens
- needs a lexer's.
-
-@defproc[(input? [v any/c]) boolean?]{
- returns @racket[#t] if @racket[v] is an @|Input|: a string, or what a
- lexer makes.}
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "defining"]{Defining Parsers}

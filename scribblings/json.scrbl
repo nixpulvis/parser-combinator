@@ -17,7 +17,8 @@
 
 This library parses text in the JSON data exchange format into Racket
  values. See the @|json-site| for more about JSON. The library is written
- entirely with @racketmodname[parser-combinator/parse] and its lexer.
+ entirely with @racketmodname[parser-combinator/parse] and
+ @racketmodname[parser-combinator/lex].
 
 @; -----------------------------------------------------------------------------
 @section[#:tag "json-values"]{JSON Values}

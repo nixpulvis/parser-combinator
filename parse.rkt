@@ -20,10 +20,7 @@
          preceded
          terminated
          sep-by*
-         sep-by+
-         tok
-         line+column
-         (struct-out token))
+         sep-by+)
 
 ; ----------------------------------------
 ; ----- Context Free Grammar Library -----
@@ -32,7 +29,6 @@
 ; A Value is whatever a parser produces:
 ; - `emp` produces its Value, '() unless it's given one
 ; - `lit`, `rx` and `span` produce the matched String
-; - `tok` produces the matched Token's value
 ; - `skip` produces '()
 ; - `pmap` produces whatever its function returns, given its parsers'
 ;   Values
@@ -52,11 +48,12 @@
 ; `positions` module below shares with grammars, and its Start, which
 ; stays in here. A grammar never writes a Start. Each combinator works
 ; its own out from its parts, so `alt` can skip the alternatives that
-; can't match the next character.
+; can't match the next character, or Token.
 (module private racket/base
   (provide (struct-out result)
            (struct-out matched)
            (struct-out token)
+           line+column
            (struct-out source)
            input?
            input-text
@@ -159,9 +156,6 @@
   ; How many kinds have IDs.
   (define (kind-count) (hash-count kind-ids))
 
-  ; Natural
-  (define eof-id (kind-id 'eof))
-
   ; String Scanner -> Source
   (define (make-source s scanner)
     (raw-source s scanner
@@ -174,7 +168,7 @@
   ; asks it for one, so it raises an error: the grammar needs a lexer's
   ; Source.
   (define (no-lexer in i)
-    (error 'tok "the input has no lexer; a grammar over Tokens parses what a lexer makes from a string"))
+    (error 'tok "the input has no lexer; a grammar over tokens parses what a lexer makes from a string"))
 
   ; Any -> Boolean
   (define (input? v)
@@ -193,6 +187,15 @@
     (cond [(string? x) (make-source x no-lexer)]
           [(source? x) x]
           [else (raise-argument-error who "input?" x)]))
+
+  ; String Natural -> (values Natural Natural)
+  ; The line and column, both from 1, of position `i` in `s`. It's worked
+  ; out only when it's needed, for an error message.
+  (define (line+column s i)
+    (for/fold ([line 1] [column 1]) ([c (in-string s 0 i)])
+      (if (char=? c #\newline)
+          (values (add1 line) 1)
+          (values line (add1 column)))))
 
   ; Source Natural -> (values (or/c Natural #f) Natural)
   ; The Kind ID of the Token after position `i`, and where it begins,
@@ -454,11 +457,12 @@
                       (substring s (matched-end m)))]
               [else
                (matched-value m)])
+        ; A failure is reported at the furthest position a Token was asked
+        ; for at. When a match left Tokens over, checking for 'eof asked
+        ; for the one after it, so that's at least where the match ended.
         (if (and (matched? m) (eq? (peek! in (matched-end m)) 'eof))
             (matched-value m)
-            (let*-values ([(id at) (next-kind+start
-                                    in
-                                    (if (matched? m) (matched-end m) (source-furthest in)))]
+            (let*-values ([(id at) (next-kind+start in (source-furthest in))]
                           [(line column) (line+column s at)])
               (error 'parse "unexpected ~a at line ~a, column ~a"
                      (case (kind-name id)
@@ -466,15 +470,6 @@
                        [(#f) (format "text ~s" (substring s at (min (string-length s) (+ at 10))))]
                        [else (kind-name id)])
                      line column))))))
-
-; String Natural -> (values Natural Natural)
-; The line and column, both from 1, of position `i` in `s`. It's worked
-; out only when it's needed, for an error message.
-(define (line+column s i)
-  (for/fold ([line 1] [column 1]) ([c (in-string s 0 i)])
-    (if (char=? c #\newline)
-        (values (add1 line) 1)
-        (values line (add1 column)))))
 
 ; (once x expr)
 ; The value of the variable `x`, which is #f until this first sets it to
@@ -496,8 +491,8 @@
   (define name
     (let ([p #f]
           [build (lambda () body)])
-      (parser (lambda (s i)
-                (run (once p (build)) s i))
+      (parser (lambda (in i)
+                (run (once p (build)) in i))
               (lambda ()
                 (start-of (once p (build))))
               'name))))
@@ -511,7 +506,7 @@
 ; Matches without consuming anything, producing `v`.
 (define (emp [v '()])
   (parser
-   (lambda (s i)
+   (lambda (in i)
      (matched v i))
    (start '() #t)))
 
@@ -649,11 +644,11 @@
 ; list.
 (define (all-of build ps)
   (or (written-out-run build ps)
-      (lambda (s i)
+      (lambda (in i)
         (let loop ([ps ps] [i i] [vs '()])
           (if (null? ps)
               (matched (apply build (reverse vs)) i)
-              (let ([m (run (car ps) s i)])
+              (let ([m (run (car ps) in i)])
                 (if (symbol? m)
                     'error
                     (loop (cdr ps)
@@ -667,8 +662,8 @@
 ; `written-out` 2 it's
 ;
 ;   (match ps
-;     [(list p1) (lambda (s i) (steps s i build () (p1)))]
-;     [(list p1 p2) (lambda (s i) (steps s i build () (p1 p2)))]
+;     [(list p1) (lambda (in i) (steps in i build () (p1)))]
+;     [(list p1 p2) (lambda (in i) (steps in i build () (p1 p2)))]
 ;     [_ #f])
 (define-syntax (written-out-run stx)
   (syntax-case stx ()
@@ -677,23 +672,23 @@
                     (for/list ([n (in-range 1 (add1 written-out))])
                       (generate-temporaries (build-list n (lambda (k) 'p))))])
        #'(match ps
-           [(list p ...) (lambda (s i) (steps s i build () (p ...)))]
+           [(list p ...) (lambda (in i) (steps in i build () (p ...)))]
            ...
            [_ #f]))]))
 
-; (steps s i build (v ...) (p ...)) : Match
+; (steps in i build (v ...) (p ...)) : Match
 ; Writes out the body of one of `all-of`'s Runs. It runs each `p` in
-; order, the first from position `i` of `s`, and fails as soon as one
+; order, the first from position `i` of `in`, and fails as soon as one
 ; does. Otherwise it calls `build` with the Values `v ...` followed by
 ; the Values of the `p`s, and ends where the last `p` ended. `all-of`
 ; starts it with no `v`s, and each step adds one. For example,
-; (steps s i build () (a b)) expands to
+; (steps in i build () (a b)) expands to
 ;
-;   (let ([m (run a s i)])
+;   (let ([m (run a in i)])
 ;     (if (symbol? m)
 ;         'error
 ;         (let ([x (matched-value m)] [j (matched-end m)])
-;           (let ([m (run b s j)])
+;           (let ([m (run b in j)])
 ;             (if (symbol? m)
 ;                 'error
 ;                 (let ([x2 (matched-value m)] [j2 (matched-end m)])
@@ -705,14 +700,14 @@
 ; written-out Runs don't have to be written by hand.
 (define-syntax steps
   (syntax-rules ()
-    [(_ s i build (v ...) ())
+    [(_ in i build (v ...) ())
      (matched (build v ...) i)]
-    [(_ s i build (v ...) (p rest ...))
-     (let ([m (run p s i)])
+    [(_ in i build (v ...) (p rest ...))
+     (let ([m (run p in i)])
        (if (symbol? m)
            'error
            (let ([x (matched-value m)] [j (matched-end m)])
-             (steps s j build (v ... x) (rest ...)))))]))
+             (steps in j build (v ... x) (rest ...)))))]))
 
 ; Parser ... -> Parser
 ; Tries each parser in order, from the same position, and matches what
@@ -722,8 +717,8 @@
 (define (alt . ps)
   (let ([choose #f])
     (parser
-     (lambda (s i)
-       (((once choose (chooser ps)) s i) s i))
+     (lambda (in i)
+       (((once choose (chooser ps)) in i) in i))
      (lambda () (alt-start ps)))))
 
 ; [Listof Parser] -> [Source Natural -> Run]
@@ -798,13 +793,13 @@
 ; [Listof Parser] -> Run
 ; Matches what the first of `ps` to match does.
 (define (first-of ps)
-  (cond [(null? ps) (lambda (s i) 'error)]
+  (cond [(null? ps) (lambda (in i) 'error)]
         [(and (null? (cdr ps)) (parser? (car ps))) (parser-run (car ps))]
-        [else (lambda (s i)
+        [else (lambda (in i)
                 (let loop ([ps ps])
                   (if (null? ps)
                       'error
-                      (let ([m (run (car ps) s i)])
+                      (let ([m (run (car ps) in i)])
                         (if (symbol? m) (loop (cdr ps)) m)))))]))
 
 ; [Listof Parser] -> Start
@@ -819,9 +814,9 @@
 ; long repetition doesn't nest a parser call per match.
 (define (star p)
   (parser
-   (lambda (s i)
+   (lambda (in i)
      (let loop ([i i] [acc '()])
-       (let ([m (run p s i)])
+       (let ([m (run p in i)])
          (if (and (matched? m) (> (matched-end m) i))
              (loop (matched-end m) (cons (matched-value m) acc))
              (matched (reverse acc) i)))))
@@ -831,38 +826,10 @@
 ; Matches what `p` matches, but only when `ok?` accepts its Value.
 (define (where ok? p)
   (parser
-   (lambda (s i)
-     (let ([m (run p s i)])
+   (lambda (in i)
+     (let ([m (run p in i)])
        (if (and (matched? m) (ok? (matched-value m))) m 'error)))
    (lambda () (start-of p))))
-
-; Symbol -> Parser
-; Symbol Any -> Parser
-; Matches one Token of the kind `kind`, producing its value. Given a
-; `value` too, it only matches a Token whose value is `equal?` to it,
-; such as a keyword among the identifiers. It needs a lexer's Source,
-; and given one without, it raises an error.
-(define tok
-  (case-lambda
-    [(kind)
-     (let ([id (kind-id kind)])
-       (parser
-        (lambda (s i)
-          (if (eq? (peek-id! s i) id)
-              (source-match s)
-              'error))
-        (start (list kind) #f)
-        kind))]
-    [(kind value)
-     (let ([id (kind-id kind)])
-       (parser
-        (lambda (s i)
-          (if (and (eq? (peek-id! s i) id)
-                   (equal? (kept-value s) value))
-              (matched value (kept-end s))
-              'error))
-        (start (list kind) #f)
-        kind))]))
 
 ; The combinators below are made from the kernel's.
 

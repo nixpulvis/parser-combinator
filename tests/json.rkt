@@ -107,7 +107,7 @@
                     (token 'colon ":" 5 6)
                     (token 'null 'null 6 10)
                     (token 'end-object "}" 10 11)))
-(check-exn #rx"position 7" (λ () (tokens json-lexer "[1,\n 2 @]")))
+(check-exn #rx"no token matches at line 2, column 4" (λ () (tokens json-lexer "[1,\n 2 @]")))
 
 ; PAIR tests
 (check-equal? (parse PAIR (json-lexer "\"\":\"\""))

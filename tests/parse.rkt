@@ -150,11 +150,11 @@
 ; ones it skips. `in-order` has a Run written by hand, so it tries them
 ; all.
 (define (in-order . ps)
-  (parser (lambda (s i)
+  (parser (lambda (in i)
             (let loop ([ps ps])
               (if (null? ps)
                   'error
-                  (let ([m (run (car ps) s i)])
+                  (let ([m (run (car ps) in i)])
                     (if (symbol? m) (loop (cdr ps)) m)))))))
 (for* ([ps (list (list (lit "a") (lit "ab") (lit "b"))
                  (list (lit "ab") (lit "a") (emp 0))
@@ -192,8 +192,8 @@
 (check-equal? (chars-of (skip char-numeric?)) #f)
 ; A parser with a Run written by hand has no Start, and one after a
 ; `lit` doesn't need one.
-(check-equal? (chars-of (parser (lambda (s i) 'error))) #f)
-(check-equal? (chars-of (preceded (lit "u") (parser (lambda (s i) 'error))))
+(check-equal? (chars-of (parser (lambda (in i) 'error))) #f)
+(check-equal? (chars-of (preceded (lit "u") (parser (lambda (in i) 'error))))
               (list (list #\u) #f))
 (check-equal? (chars-of (rx #rx"a")) #f)
 (check-equal? (chars-of (seq (opt (lit "-")) (lit "1") (lit "2")))
@@ -349,14 +349,14 @@
 ; consumes something and then the rest, or else nothing.
 (define (star-by-recursion p)
   (letrec ([consuming (parser
-                       (lambda (s i)
-                         (let ([m (run p s i)])
+                       (lambda (in i)
+                         (let ([m (run p in i)])
                            (if (and (matched? m) (> (matched-end m) i))
                                m
                                'error))))]
            [self (alt (pmap cons
                             consuming
-                            (parser (lambda (s i) (run self s i))))
+                            (parser (lambda (in i) (run self in i))))
                       (emp))])
     self))
 (for* ([p (list (lit "a")
@@ -467,9 +467,9 @@
 (check-equal? (begin ((seq (lit "ab") spy) spied)
                      (and (eq? (car seen) spied) (cdr seen)))
               2)
-(check-equal? (object-name (positions:parser (lambda (s i) 'error) 'NAMED))
+(check-equal? (object-name (positions:parser (lambda (in i) 'error) 'NAMED))
               'NAMED)
-(check-equal? (object-name (positions:parser (lambda (s i) 'error))) #f)
+(check-equal? (object-name (positions:parser (lambda (in i) 'error))) #f)
 ; A plain-function parser can't give back more text than it was given.
 (define (GROW s)
   (result 'g (string-append "zz" s)))

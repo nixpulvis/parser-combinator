@@ -1,12 +1,16 @@
 #lang racket/base
-(require (only-in "parse.rkt" token [skip skip-chars])
+(require (only-in "parse.rkt" [skip skip-chars])
          (only-in (submod "parse.rkt" private)
-                  [parser parser-with-start] source-text make-source kept-value kept-start kept-end peek!
-                  ->source run parser? parser-run matched-end start-of start-chars start-empty? kind-id))
+                  [parser parser-with-start] token struct:token token? token-kind token-value
+                  token-start token-end source-text source-match make-source kept-value
+                  kept-start kept-end peek! peek-id! ->source run parser? parser-run matched
+                  matched-end start start-of start-chars start-empty? kind-id line+column))
 
 (provide lexer
+         tok
          tokens
-         with-lexer)
+         with-lexer
+         (struct-out token))
 
 ; ---------------------------
 ; ----- Lexing to Tokens -----
@@ -24,6 +28,8 @@
 ; A Lexer is a [String -> Source]
 ; that makes a Source of the String with its Scanner, for `parse` and
 ; the grammar's `tok`s. To a program, the Source is an Input.
+
+; A Token is a (token Symbol Any Natural Natural), from parse.rkt.
 
 ; (lexer #:skip skip [kind parser] ...) : Lexer
 ; Makes a Lexer whose Tokens come after whatever `skip` matches, or,
@@ -112,6 +118,34 @@
                                   [(caar rs) (values (caar rs) i m)]
                                   [else (next (matched-end m))]))))))))))))
 
+; Symbol -> Parser
+; Symbol Any -> Parser
+; Matches one Token of the kind `kind`, producing its value. Given a
+; `value` too, it only matches a Token whose value is `equal?` to it,
+; such as a keyword among the identifiers. It needs a lexer's Source,
+; and given one without, it raises an error.
+(define tok
+  (case-lambda
+    [(kind)
+     (let ([id (kind-id kind)])
+       (parser-with-start
+        (lambda (in i)
+          (if (eq? (peek-id! in i) id)
+              (source-match in)
+              'error))
+        (start (list kind) #f)
+        kind))]
+    [(kind value)
+     (let ([id (kind-id kind)])
+       (parser-with-start
+        (lambda (in i)
+          (if (and (eq? (peek-id! in i) id)
+                   (equal? (kept-value in) value))
+              (matched value (kept-end in))
+              'error))
+        (start (list kind) #f)
+        kind))]))
+
 ; Lexer Parser -> Parser
 ; Matches what `p` does, over the Tokens `lex` finds from where it's
 ; run. It lets a grammar over characters use one over Tokens for part of
@@ -129,18 +163,19 @@
 
 ; Parser -> Run
 (define (as-run p)
-  (if (parser? p) (parser-run p) (lambda (s i) (run p s i))))
+  (if (parser? p) (parser-run p) (lambda (in i) (run p in i))))
 
 ; Lexer String -> [Listof Token]
 ; The Tokens `lex` finds in `s`, to see what a grammar over them sees. It
 ; raises an error where no rule matches.
 (define (tokens lex s)
-  (let ([in (lex s)])
+  (let ([in (->source 'tokens (lex s))])
     (let loop ([i 0] [acc '()])
       (let ([kind (peek! in i)])
         (case kind
           [(eof) (reverse acc)]
-          [(#f) (error 'tokens "no token matches at position ~a" (kept-start in))]
+          [(#f) (let-values ([(line column) (line+column s (kept-start in))])
+                  (error 'tokens "no token matches at line ~a, column ~a" line column))]
           [else (loop (kept-end in)
                       (cons (token kind (kept-value in) (kept-start in) (kept-end in))
                             acc))])))))

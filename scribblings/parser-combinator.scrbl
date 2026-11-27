@@ -13,10 +13,12 @@ that consume parsers and produce new parsers. Each parser is a Racket function
 from a string to a result, so a grammar is written as a collection of plain
 definitions, one per non-terminal.
 
-The package comes with two libraries:
+The package comes with three libraries:
 @itemlist[
  @item{@racketmodname[parser-combinator/parse], combinators for building
  parsers}
+ @item{@racketmodname[parser-combinator/lex], lexers, for grammars over
+ tokens}
  @item{@racketmodname[parser-combinator/json], a JSON parser}
 ]
 
@@ -99,4 +101,5 @@ The source of @racketmodname[parser-combinator/json] builds its data the
  same way, for a larger grammar.
 
 @include-section["parse.scrbl"]
+@include-section["lex.scrbl"]
 @include-section["json.scrbl"]
