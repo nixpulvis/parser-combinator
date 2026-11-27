@@ -37,21 +37,24 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
 @defform*[((lexer [kind rule] ...)
            (lexer #:skip skip [kind rule] ...))
           #:contracts ([skip (or/c string? #,Parser)]
+                       [kind symbol?]
                        [rule #,Parser])]{
- produces a @|Lexer|. Each token comes after whatever @racket[skip]
- matches. A string @racket[skip] is the same as
- @racket[(skip _string)], which matches any run of its characters.
- Without @racket[skip], nothing is skipped.
- A token is matched by the first @racket[rule] that matches some text,
- and has that rule's @racket[kind], any symbol, and the @racket[rule]'s
- @tech{Value} as its value. A rule that matches no text is passed over,
- since a token must have some; only @racket[skip] can match none.
+ produces a @|Lexer|. Before each token, it skips whatever
+ @racket[skip] matches. A string @racket[skip] means
+ @racket[(skip _string)], which matches any run of its characters. Any
+ other @racket[skip] is a @Parser, so what's skipped can have a grammar
+ of its own. Without @racket[skip], nothing is skipped.
+ Each token is matched by the first @racket[rule] that matches some
+ text. The token's kind is that rule's @racket[kind], a symbol written
+ as for @racket[tok], and its value is the rule's @tech{Value}. A rule
+ that matches no text is passed over, since a token can't be empty.
+ Only @racket[skip] may match nothing.
 
 @examples[#:eval lex-eval
 (define sums
   (lexer #:skip " "
-         [num (pmap string->number (rx #px"\\d+"))]
-         [plus (lit "+")]))
+         ['num (pmap string->number (rx #px"\\d+"))]
+         ['plus (lit "+")]))
 (define SUM (sep-by+ (tok 'num) (tok 'plus)))
 (parse SUM (sums "1 + 2 +3"))
 (eval:error (parse SUM (sums "1 + + 2")))

@@ -39,18 +39,19 @@
 ; Makes a Lexer whose Tokens come after whatever `skip` matches, or,
 ; given a String, after any run of its characters, as `skip` matches.
 ; Without `skip`, it skips nothing. Each Token is matched by the first
-; rule's `parser` that matches some text, and has that rule's `kind`,
-; and the parser's Value as its value. A rule that matches no text is
-; passed over, since a Token of no text would never end. As in `alt`,
-; the rules are tried in order and the first to match wins, so a
-; keyword's rule goes before the identifiers' rule, and only the rules
-; that can begin with the next character are tried.
+; rule's `parser` that matches some text, and has that rule's `kind`, a
+; Symbol, written as for `tok`, and the parser's Value as its value. A
+; rule that matches no text is passed over, since a Token of no text
+; would never end. As in `alt`, the rules are tried in order and the
+; first to match wins, so a keyword's rule goes before the identifiers'
+; rule, and only the rules that can begin with the next character are
+; tried.
 (define-syntax lexer
   (syntax-rules ()
     [(_ #:skip skip [kind p] ...)
-     (make-lexer skip (list (cons 'kind p) ...))]
+     (make-lexer skip (list (cons kind p) ...))]
     [(_ [kind p] ...)
-     (make-lexer #f (list (cons 'kind p) ...))]))
+     (make-lexer #f (list (cons kind p) ...))]))
 
 ; (or/c String Parser #f) [Listof (cons Symbol Parser)] -> Lexer
 ; A String `skip` is the `skip` parser of its characters, and #f skips
@@ -59,6 +60,8 @@
   (unless (or (not skip) (string? skip) (parser? skip))
     (raise-argument-error 'lexer "(or/c string? parser?)" skip))
   (for ([r (in-list rules)])
+    (unless (symbol? (car r))
+      (raise-argument-error 'lexer "symbol?" (car r)))
     (unless (parser? (cdr r))
       (raise-argument-error 'lexer "parser?" (cdr r))))
   (scanning-lexer (make-scanner (if (string? skip) (skip-chars skip) skip) rules)))

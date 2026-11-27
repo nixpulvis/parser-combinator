@@ -266,14 +266,14 @@
 ; a lexer is made when it's defined, so it comes after its rules.
 (define json-lexer
   (lexer #:skip " \t\n\r"
-         [begin-object (lit "{")]
-         [end-object (lit "}")]
-         [begin-array (lit "[")]
-         [end-array (lit "]")]
-         [comma (lit ",")]
-         [colon (lit ":")]
-         [null (pmap (const 'null) (lit "null"))]
-         [true (pmap (const #t) (lit "true"))]
-         [false (pmap (const #f) (lit "false"))]
-         [number NUMBER]
-         [string STRING]))
+         ['begin-object (lit "{")]
+         ['end-object (lit "}")]
+         ['begin-array (lit "[")]
+         ['end-array (lit "]")]
+         ['comma (lit ",")]
+         ['colon (lit ":")]
+         ['null (pmap (const 'null) (lit "null"))]
+         ['true (pmap (const #t) (lit "true"))]
+         ['false (pmap (const #f) (lit "false"))]
+         ['number NUMBER]
+         ['string STRING]))

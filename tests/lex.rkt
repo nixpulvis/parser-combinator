@@ -37,15 +37,15 @@
 ; so a keyword's rule splits an identifier that begins with it.
 (define words
   (lexer #:skip (skip " ")
-         [if (lit "if")]
-         [ident (span "abcdefghijklmnopqrstuvwxyz")]))
+         ['if (lit "if")]
+         ['ident (span "abcdefghijklmnopqrstuvwxyz")]))
 (check-equal? (map token-kind (tokens words "if iffy x"))
               '(if if ident ident))
 ; Lexing keywords as identifiers, and matching them with `tok`'s value,
 ; avoids that.
 (define idents
   (lexer #:skip (skip " ")
-         [ident (span "abcdefghijklmnopqrstuvwxyz")]))
+         ['ident (span "abcdefghijklmnopqrstuvwxyz")]))
 (check-equal? (parse (seq (tok 'ident "if") (tok 'ident) (tok 'ident))
                      (idents "if iffy x"))
               '("if" "iffy" "x"))
@@ -54,42 +54,44 @@
 ; Any symbol can be a kind, even one that reads like the end of the text.
 (define ends
   (lexer #:skip " "
-         [eof (lit "end")]
-         [ident (span "abcdefghijklmnopqrstuvwxyz")]))
+         ['eof (lit "end")]
+         ['ident (span "abcdefghijklmnopqrstuvwxyz")]))
 (check-equal? (map token-kind (tokens ends "ab end")) '(ident eof))
 (check-equal? (parse (seq (tok 'ident) (tok 'eof)) (ends "ab end")) '("ab" "end"))
 (check-exn #rx"unexpected end of input at line 1, column 3"
            (λ () (parse (seq (tok 'ident) (tok 'eof)) (ends "ab"))))
 ; Without #:skip, a lexer skips nothing.
-(define bare (lexer [a (lit "a")]))
+(define bare (lexer ['a (lit "a")]))
 (check-equal? (map token-kind (tokens bare "aa")) '(a a))
 (check-exn #rx"tokens: unexpected text \" a\" at line 1, column 2"
            (λ () (tokens bare "a a")))
+; A rule's kind is a symbol, written as for `tok`.
+(check-exn exn:fail:contract? (λ () (lexer ["a" (lit "a")])))
 
 ; The grammar never sees whitespace, so a lexer that also drops comments
 ; parses JSON with comments with the same grammar.
 (define jsonc-lexer
   (lexer #:skip (star (alt (span " \t\n\r")
                            (seq (lit "//") (skip (λ (c) (not (char=? c #\newline)))))))
-         [begin-object (lit "{")]
-         [end-object (lit "}")]
-         [begin-array (lit "[")]
-         [end-array (lit "]")]
-         [comma (lit ",")]
-         [colon (lit ":")]
-         [null (pmap (const 'null) (lit "null"))]
-         [true (pmap (const #t) (lit "true"))]
-         [false (pmap (const #f) (lit "false"))]
-         [number NUMBER]
-         [string STRING]))
+         ['begin-object (lit "{")]
+         ['end-object (lit "}")]
+         ['begin-array (lit "[")]
+         ['end-array (lit "]")]
+         ['comma (lit ",")]
+         ['colon (lit ":")]
+         ['null (pmap (const 'null) (lit "null"))]
+         ['true (pmap (const #t) (lit "true"))]
+         ['false (pmap (const #f) (lit "false"))]
+         ['number NUMBER]
+         ['string STRING]))
 (check-equal? (parse JSON-VALUE (jsonc-lexer "// a list\n[1, // one\n 2]\n// done"))
               '(1 2))
 
 ; Given a String, a lexer skips its characters, ASCII or not.
 (define nbsp-lexer
   (lexer #:skip "  "
-         [comma (lit ",")]
-         [number (span "0123456789")]))
+         ['comma (lit ",")]
+         ['number (span "0123456789")]))
 (check-equal? (map token-value (tokens nbsp-lexer " 1 ,  2 "))
               '("1" "," "2"))
 
@@ -99,7 +101,7 @@
 ; don't skip whitespace before themselves.
 (define names
   (lexer #:skip " "
-         [ident (span "abcdefghijklmnopqrstuvwxyz")]))
+         ['ident (span "abcdefghijklmnopqrstuvwxyz")]))
 (define address (seq (tok 'ident) (lit "@") (tok 'ident)))
 (check-equal? (parse address (names "a@b")) '("a" "@" "b"))
 (check-equal? (parse address (names " a@ b ")) '("a" "@" "b"))
