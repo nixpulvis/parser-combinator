@@ -25,18 +25,23 @@ The two stages run together: a token is read when the grammar asks for
  it, and no list of tokens is built. A lexer turns a string into an
  @|Input|, which @racket[parse] accepts as it does a string.
 
-@deftech{Lexer} : @racket[(-> string? input?)]
+@deftech{Lexer} : @racket[lexer?]
 
-A @Lexer makes an @Input of a string, whose tokens a grammar over
- tokens matches.
+A @Lexer is made by @racket[lexer]. It's a function: applied to a
+ string, it makes an @Input of it, whose tokens a grammar over tokens
+ matches.
+
+@defproc[(lexer? [v any/c]) boolean?]{
+ returns @racket[#t] if @racket[v] is a @Lexer, made by @racket[lexer].}
 
 @defform*[((lexer [kind rule] ...)
            (lexer #:skip skip [kind rule] ...))
           #:contracts ([skip (or/c string? #,Parser)]
                        [rule #,Parser])]{
  produces a @|Lexer|. Each token comes after whatever @racket[skip]
- matches, or, when @racket[skip] is a string, after any run of its
- characters, which is faster. Without @racket[skip], nothing is skipped.
+ matches. A string @racket[skip] is the same as
+ @racket[(skip _string)], which matches any run of its characters.
+ Without @racket[skip], nothing is skipped.
  A token is matched by the first @racket[rule] that matches some text,
  and has that rule's @racket[kind], any symbol, and the @racket[rule]'s
  @tech{Value} as its value. A rule that matches no text is passed over,
@@ -85,16 +90,17 @@ A @Lexer makes an @Input of a string, whose tokens a grammar over
 ((seq (tok 'num) (lit "!")) (sums "5 !"))
 ]}
 
-@defproc[(with-lexer [lex (-> string? input?)] [p #,Parser]) #,Parser]{
+@defproc[(with-lexer [lex lexer?] [p #,Parser]) #,Parser]{
  produces a @Parser that matches what @racket[p] does, over the tokens
- that @racket[lex] finds from where it's run. It lets a grammar over
- characters use one over tokens for part of its text, or a grammar over
- tokens use another lexer's. What @racket[lex] skips belongs to the
- token after it, so @racket[p] takes what's skipped before its tokens,
- and leaves what follows its match to the grammar around it. Where the
- parse gets furthest inside @racket[p], @racket[parse]'s error says it in
- @racket[lex]'s tokens. Given an @Input that @racket[lex] made,
- @racket[p] simply runs over its tokens.
+ that @racket[lex] finds from where it runs. This lets a grammar over
+ characters use a grammar over tokens for part of its text, or lets a
+ grammar over tokens use another lexer. What @racket[lex] skips belongs
+ to the token after it, so @racket[p] takes the skipped text before its
+ tokens, and leaves anything after its match to the surrounding
+ grammar. When the parse gets furthest inside @racket[p],
+ @racket[parse]'s error describes it in @racket[lex]'s tokens. Given an
+ @Input that @racket[lex] made, @racket[p] runs over its tokens
+ directly.
 
 @examples[#:eval lex-eval
 (parse (seq (lit "sum=") (with-lexer sums SUM) (lit ";"))
@@ -103,7 +109,7 @@ A @Lexer makes an @Input of a string, whose tokens a grammar over
                    "sum=1 2"))
 ]}
 
-@defproc[(tokens [lex (-> string? input?)] [str string?]) (listof token?)]{
+@defproc[(tokens [lex lexer?] [str string?]) (listof token?)]{
  produces the tokens that @racket[lex] finds in @racket[str], to show
  what a grammar over them sees. Where no rule matches, it raises
  @racket[exn:fail], saying what's there, as @racket[parse] would.

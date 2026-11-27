@@ -5,7 +5,7 @@
                      racket/contract/base
                      parser-combinator/parse
                      parser-combinator/json
-                     (only-in parser-combinator/lex with-lexer)))
+                     (only-in parser-combinator/lex with-lexer lexer?)))
 
 @(define Value @tech{Value})
 @(define JSON @tech{JSON})
@@ -105,11 +105,11 @@ Whitespace belongs to the token after it. A value takes the whitespace
  and strings. They parse characters, not tokens, and match only their
  own text.
 
-@defthing[json-lexer (-> string? input?)]{
- produces an @tech{Input} of a string, with JSON's lexer. It reads the
- string's tokens as a parser asks for them, skipping any whitespace
- before each, which is any of @racket[#\space], @racket[#\tab],
- @racket[#\newline], and @racket[#\return].
+@defthing[json-lexer lexer?]{
+ produces an @tech{Input} from a string, using JSON's lexer. It reads
+ tokens as a parser asks for them, skipping any whitespace before each:
+ @racket[#\space], @racket[#\tab], @racket[#\newline], and
+ @racket[#\return].
 
 @examples[#:eval json-eval
 (parse VALUE (json-lexer "  null "))

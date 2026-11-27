@@ -135,11 +135,13 @@
                   'error)))))
 (check-equal? (parse (seq (tok 'ident) AT-RUN (tok 'ident)) (names "a@b"))
               '("a" "@" "b"))
-; A grammar over Tokens given a String, with no lexer, says it needs one.
-(check-exn #rx"tok: the input has no lexer" (λ () (parse JSON-VALUE "null")))
-(check-exn #rx"tok: the input has no lexer" (λ () ((tok 'ident) "a")))
-; A lexer that doesn't make an Input is caught before any Run reads it.
-(check-exn exn:fail:contract? (λ () (parse (with-lexer (λ (s) 'oops) (lit "a")) "a")))
+; A grammar over Tokens raises an error given a string.
+(check-exn #rx"^tok: input was not made by a lexer$" (λ () (parse JSON-VALUE "null")))
+(check-exn #rx"^tok: input was not made by a lexer$" (λ () ((tok 'ident) "a")))
+; A lexer is one `lexer` made, and anything else is caught when it's used.
+(check-exn exn:fail:contract? (λ () (with-lexer (λ (s) 'oops) (lit "a"))))
+(check-exn exn:fail:contract? (λ () (tokens (λ (s) s) "a")))
+(check-true (lexer? json-lexer))
 ; with-lexer goes the other way: a grammar over characters uses one over
 ; Tokens for part of its text.
 (define setting

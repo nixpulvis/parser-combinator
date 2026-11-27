@@ -194,11 +194,10 @@
         (set-source-inner! in inner))))
 
   ; Scanner
-  ; The Scanner of a Source with no lexer. Only a grammar over Tokens
-  ; asks it for one, so it raises an error: the grammar needs a lexer's
-  ; Source.
+  ; The Scanner of a Source made from a string, which has no Tokens, so
+  ; a tok over it raises an error.
   (define (no-lexer in i)
-    (error 'tok "the input has no lexer; a grammar over tokens parses what a lexer makes from a string"))
+    (error 'tok "input was not made by a lexer"))
 
   ; Any -> Boolean
   (define (input? v)

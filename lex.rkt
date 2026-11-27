@@ -3,11 +3,12 @@
          (only-in (submod "parse.rkt" private)
                   [parser parser-with-start] token struct:token token? token-kind token-value
                   token-start token-end source-text source-match source-scanner make-source
-                  kept-value kept-start kept-end keep-inner! peek! peek-id! ->source run parser?
-                  parser-run matched matched-end start start-of start-chars start-empty?
-                  kind-id end-kind raise-unexpected))
+                  kept-value kept-start kept-end keep-inner! peek! peek-id! run parser?
+                  parser-run matched matched-end start start-of start-chars kind-id end-kind
+                  raise-unexpected))
 
 (provide lexer
+         (rename-out [scanning-lexer? lexer?])
          tok
          tokens
          with-lexer
@@ -26,16 +27,16 @@
 ; The stages are interleaved: a Token is scanned when the grammar asks
 ; for it, from the String, so no list of Tokens is made.
 
-; A Lexer is a [String -> Source]
-; that makes a Source of the String with its Scanner, for `parse` and
-; the grammar's `tok`s. To a program, the Source is an Input.
+; A Lexer is a (scanning-lexer Scanner), made by `lexer`, and applied to a
+; String like a function, to make a Source of it with its Scanner, for
+; `parse` and the grammar's `tok`s. To a program, the Source is an Input.
 
 ; A Token is a (token Symbol Any Natural Natural), from parse.rkt.
 
 ; (lexer [kind parser] ...) : Lexer
 ; (lexer #:skip skip [kind parser] ...) : Lexer
 ; Makes a Lexer whose Tokens come after whatever `skip` matches, or,
-; given a String, after any run of its characters, which is faster.
+; given a String, after any run of its characters, as `skip` matches.
 ; Without `skip`, it skips nothing. Each Token is matched by the first
 ; rule's `parser` that matches some text, and has that rule's `kind`,
 ; and the parser's Value as its value. A rule that matches no text is
@@ -48,20 +49,19 @@
     [(_ #:skip skip [kind p] ...)
      (make-lexer skip (list (cons 'kind p) ...))]
     [(_ [kind p] ...)
-     (make-lexer "" (list (cons 'kind p) ...))]))
+     (make-lexer #f (list (cons 'kind p) ...))]))
 
-; (or/c String Parser) [Listof (cons Symbol Parser)] -> Lexer
+; (or/c String Parser #f) [Listof (cons Symbol Parser)] -> Lexer
+; A String `skip` is the `skip` parser of its characters, and #f skips
+; nothing.
 (define (make-lexer skip rules)
-  (unless (or (string? skip) (parser? skip))
+  (unless (or (not skip) (string? skip) (parser? skip))
     (raise-argument-error 'lexer "(or/c string? parser?)" skip))
   (for ([r (in-list rules)])
     (unless (parser? (cdr r))
       (raise-argument-error 'lexer "parser?" (cdr r))))
-  (scanning-lexer (make-scanner skip rules)))
+  (scanning-lexer (make-scanner (if (string? skip) (skip-chars skip) skip) rules)))
 
-; A Lexer made by `lexer` is a (scanning-lexer Scanner), applied to a
-; String like a function. `with-lexer` knows a Source it made by its
-; Scanner.
 (struct scanning-lexer (scanner)
   #:property prop:procedure
   (lambda (self s)
@@ -69,7 +69,7 @@
       (raise-argument-error 'lexer "string?" s))
     (make-source s (scanning-lexer-scanner self))))
 
-; (or/c String Parser) [Listof (cons Symbol Parser)] -> Scanner
+; (or/c Parser #f) [Listof (cons Symbol Parser)] -> Scanner
 ; A Scanner is a [Source Natural -> (values (or/c Natural #f) Natural Match)]
 ; that skips what `skip` matches from position `i` of the Source's text,
 ; and then matches the first of `rules` that matches. It produces that
@@ -84,34 +84,21 @@
 ; where there's nothing to skip it costs no more than that check. When
 ; `skip` matches something, the rules are picked again after it. It
 ; knows which rule matched, so it needn't wrap each rule's Value with its
-; kind.
+; kind. A match of no text is passed over, from `skip` or a rule, and a
+; match of some text begins with one of its parser's Start's characters,
+; so only those count, even for a parser that can match nothing.
 (define (make-scanner skip rules)
   (let* ([end (kind-id end-kind)]
-         ; Given a String, the ASCII characters in it are skipped by a
-         ; loop here, as `skip` does, and any others by a `skip` rule.
-         [space (if (string? skip)
-                    (for/vector #:length 128 ([n (in-range 128)])
-                      (and (memv (integer->char n) (string->list skip)) #t))
-                    (make-vector 128 #f))]
-         [skip (if (string? skip)
-                   (let ([others (filter (lambda (c) (>= (char->integer c) 128))
-                                         (string->list skip))])
-                     (and (pair? others) (skip-chars (list->string others))))
-                   skip)]
          ; A #f kind marks `skip`.
          [rules (append (if skip (list (cons #f skip)) '())
                         (for/list ([r (in-list rules)])
                           (cons (kind-id (car r)) (cdr r))))]
          [sts (for/list ([r (in-list rules)]) (start-of (cdr r)))]
          ; [Maybe Char] -> [Listof (cons (or/c Natural #f) Parser)]
-         ; `skip` can match nothing, but only matters where it matches
-         ; something, so only its characters count.
          [for-char
           (lambda (c)
             (for/list ([r (in-list rules)] [st (in-list sts)]
-                       #:when (or (not st)
-                                  (and (car r) (start-empty? st))
-                                  (and c (memv c (start-chars st)))))
+                       #:when (or (not st) (and c (memv c (start-chars st)))))
               (cons (car r) (parser-run (cdr r)))))]
          [otherwise (for-char #f)]
          [ascii (for/vector #:length 128 ([n (in-range 128)])
@@ -125,20 +112,17 @@
         (let next ([i i])
           (if (= i (string-length s))
               (values end i 'error)
-              (let* ([c (string-ref s i)]
-                     [n (char->integer c)])
-                (if (and (< n 128) (vector-ref space n))
-                    (next (add1 i))
-                    (let loop ([rs (if (< n 128)
-                                       (vector-ref ascii n)
-                                       (hash-ref others c (lambda () otherwise)))])
-                      (if (null? rs)
-                          (values #f i 'error)
-                          (let ([m ((cdar rs) in i)])
-                            (cond [(or (symbol? m) (= (matched-end m) i))
-                                   (loop (cdr rs))]
-                                  [(caar rs) (values (caar rs) i m)]
-                                  [else (next (matched-end m))]))))))))))))
+              (let ([c (string-ref s i)])
+                (let loop ([rs (if (< (char->integer c) 128)
+                                   (vector-ref ascii (char->integer c))
+                                   (hash-ref others c (lambda () otherwise)))])
+                  (if (null? rs)
+                      (values #f i 'error)
+                      (let ([m ((cdar rs) in i)])
+                        (cond [(or (symbol? m) (= (matched-end m) i))
+                               (loop (cdr rs))]
+                              [(caar rs) (values (caar rs) i m)]
+                              [else (next (matched-end m))])))))))))))
 
 ; Symbol -> Parser
 ; Symbol Any -> Parser
@@ -183,16 +167,16 @@
 ; got furthest inside it is said in its Tokens. Nothing is known about
 ; what `p` begins with in characters, so `alt` always tries it.
 (define (with-lexer lex p)
-  (unless (procedure? lex)
-    (raise-argument-error 'with-lexer "(-> string? input?)" lex))
+  (unless (scanning-lexer? lex)
+    (raise-argument-error 'with-lexer "lexer?" lex))
   (unless (parser? p)
     (raise-argument-error 'with-lexer "parser?" p))
-  (let ([scanner (and (scanning-lexer? lex) (scanning-lexer-scanner lex))])
+  (let ([scanner (scanning-lexer-scanner lex)])
     (parser-with-start
      (lambda (in i)
-       (if (and scanner (eq? (source-scanner in) scanner))
+       (if (eq? (source-scanner in) scanner)
            (run p in i)
-           (let* ([inner (->source 'with-lexer (lex (source-text in)))]
+           (let* ([inner (make-source (source-text in) scanner)]
                   [m (run p inner i)])
              (keep-inner! in inner)
              m)))
@@ -202,7 +186,9 @@
 ; The Tokens `lex` finds in `s`, to see what a grammar over them sees. It
 ; raises an error where no rule matches, as `parse` would there.
 (define (tokens lex s)
-  (let ([in (->source 'tokens (lex s))])
+  (unless (scanning-lexer? lex)
+    (raise-argument-error 'tokens "lexer?" 0 lex s))
+  (let ([in (lex s)])
     (let loop ([i 0] [acc '()])
       (let ([kind (peek! in i)])
         (cond [(eq? kind end-kind) (reverse acc)]
