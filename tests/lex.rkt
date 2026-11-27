@@ -49,8 +49,13 @@
 (check-equal? (parse (seq (tok 'ident "if") (tok 'ident) (tok 'ident))
                      (ident-lexer "if iffy x"))
               '("if" "iffy" "x"))
-(check-exn exn:fail? (λ () (parse (seq (tok 'ident "if") (tok 'ident))
-                                  (ident-lexer "iffy x"))))
+; Where its value isn't the one there, the error says the value expected.
+(check-exn #rx"^parse: unexpected ident at line 1, column 1\n  expected: ident \"if\"$"
+           (λ () (parse (seq (tok 'ident "if") (tok 'ident))
+                        (ident-lexer "iffy x"))))
+; A kind is a symbol.
+(check-exn exn:fail:contract? (λ () (tok "ident")))
+(check-exn exn:fail:contract? (λ () (tok "ident" "if")))
 ; Any symbol can be a kind, even one that reads like the end of the text.
 (define eof-lexer
   (lexer #:skip " "
@@ -162,3 +167,14 @@
 ; JSON's VALUE brings json-lexer with it, so it works in any grammar.
 (check-equal? (parse (seq (lit "a=") VALUE (lit ";")) "a= [1];") '("a=" (1) ";"))
 (check-equal? (parse (seq (tok 'ident) VALUE) (ident-lexer "x [1]")) '("x" (1)))
+; What a lexer made can be parsed again, and how far an earlier parse
+; of it got doesn't count toward a later one.
+(define parsed-twice (json-lexer "[1, 2]"))
+(check-equal? (parse VALUE parsed-twice) '(1 2))
+(check-exn #rx"^parse: unexpected begin-array at line 1, column 1\n  expected: number$"
+           (λ () (parse (tok 'number) parsed-twice)))
+(check-equal? (result-value ((tok 'begin-array) parsed-twice)) "[")
+(check-exn #rx"^parse: unexpected begin-array at line 1, column 1\n  expected: number$"
+           (λ () (parse (tok 'number) parsed-twice)))
+; tokens takes a string.
+(check-exn exn:fail:contract? (λ () (tokens json-lexer 5)))

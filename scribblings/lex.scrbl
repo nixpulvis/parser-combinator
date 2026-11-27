@@ -67,13 +67,19 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
  wins, even if a later rule would match more. So a rule for a keyword,
  placed before the rule for names, splits a name that starts with that
  keyword. To avoid that, lex keywords as names, and match them with
- @racket[tok]'s @racket[value].}
+ @racket[tok]'s @racket[value].
+
+ A lexer looks at what its rules and @racket[skip] can begin with when
+ it's made. So they're defined before it, with the parsers they use,
+ including those made with @racket[define-parser], which it evaluates
+ then.}
 
 @defproc*[([(tok [kind symbol?]) #,Parser]
            [(tok [kind symbol?] [value any/c]) #,Parser])]{
  produces a @Parser that matches one token of kind @racket[kind], and
  produces its value. With @racket[value], it only matches a token whose
- value is @racket[equal?] to it, such as one keyword among the names.
+ value is @racket[equal?] to it, such as one keyword among the names,
+ and @racket[parse]'s error expects the kind with that value.
  It needs an @Input made by a lexer. Given a string, it raises
  @racket[exn:fail].
 
@@ -110,7 +116,9 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
 
 @examples[#:eval lex-eval
 (define SUM-SETTING
-  (seq (lit "sum=") (with-lexer sum-lexer SUM) (lit ";")))
+  (seq (lit "sum=")
+       (with-lexer sum-lexer SUM)
+       (lit ";")))
 (parse SUM-SETTING "sum=1 + 2;")
 (eval:error (parse SUM-SETTING "sum=1 2;"))
 ]}
@@ -118,8 +126,8 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
 @defproc[(tokens [lex #,Lexer] [str string?]) (listof token?)]{
  produces the tokens that @racket[lex] finds in @racket[str], to show
  what a grammar over them sees. Where no rule matches, it raises
- @racket[exn:fail] with the message @racket[parse] would give,
- including what it was lexing.
+ @racket[exn:fail], saying what it found and where as @racket[parse]
+ does, with what it was lexing if a rule had begun a token.
 
 @examples[#:eval lex-eval
 (tokens sum-lexer "1 + 2")

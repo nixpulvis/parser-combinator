@@ -456,6 +456,8 @@
               'error)
 (check-exn exn:fail:contract? (λ () (positions:run (lit "b") 'ab 0)))
 (check-exn exn:fail:contract? (λ () (positions:run (lambda (s) 'error) "ab" 0)))
+(check-exn exn:fail:contract? (λ () (positions:run (lit "b") "ab" -1)))
+(check-exn exn:fail:contract? (λ () (positions:run (lit "b") "ab" 3)))
 ; A parser made with `parser` is given the input's text itself, not a
 ; copy.
 (define seen #f)
@@ -482,6 +484,7 @@
 (check-equal? (positions:fail "ab" 1) 'error)
 (check-exn exn:fail:contract? (λ () (positions:fail 'ab 1)))
 (check-exn exn:fail:contract? (λ () (positions:fail "ab" -1)))
+(check-exn exn:fail:contract? (λ () (positions:fail "ab" 3)))
 
 ; parse tests
 (check-equal? (parse (emp) "") '())

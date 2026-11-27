@@ -150,11 +150,14 @@
 ; Symbol Any -> Parser
 ; Matches one Token of the kind `kind`, producing its value. Given a
 ; `value` too, it only matches a Token whose value is `equal?` to it,
-; such as a keyword among the identifiers. It needs a lexer's Source,
-; and given one without, it raises an error.
+; such as a keyword among the identifiers, and what it expects is said
+; with the value. It needs a lexer's Source, and given one without, it
+; raises an error.
 (define tok
   (case-lambda
     [(kind)
+     (unless (symbol? kind)
+       (raise-argument-error 'tok "symbol?" kind))
      (let ([id (kind-id kind)]
            [labels (list kind)])
        (parser-with-start
@@ -165,8 +168,10 @@
         (start (list kind) #f labels)
         kind))]
     [(kind value)
+     (unless (symbol? kind)
+       (raise-argument-error 'tok "symbol?" 0 kind value))
      (let ([id (kind-id kind)]
-           [labels (list kind)])
+           [labels (list (format "~a ~s" kind value))])
        (parser-with-start
         (lambda (in i)
           (if (and (eq? (peek-id! in i) id)
@@ -214,6 +219,8 @@
 (define (tokens lex s)
   (unless (scanning-lexer? lex)
     (raise-argument-error 'tokens "lexer?" 0 lex s))
+  (unless (string? s)
+    (raise-argument-error 'tokens "string?" 1 lex s))
   (let ([in (lex s)])
     (let loop ([i 0] [acc '()])
       (let ([kind (peek! in i)])

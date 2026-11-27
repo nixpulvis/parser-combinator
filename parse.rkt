@@ -68,6 +68,7 @@
            make-source
            no-lexer
            ->source
+           new-source
            peek!
            peek-id!
            kind-id
@@ -222,6 +223,15 @@
   (define (->source who x)
     (cond [(string? x) (make-source x no-lexer)]
           [(source? x) x]
+          [else (raise-argument-error who "input?" x)]))
+
+  ; Symbol Input -> Source
+  ; A new Source of `x`'s text, with its lexer, for `who`. A parse runs
+  ; over one of its own, so what an earlier parse of `x` noted, of how
+  ; far it got, doesn't count toward this one.
+  (define (new-source who x)
+    (cond [(string? x) (make-source x no-lexer)]
+          [(source? x) (make-source (source-text x) (source-scanner x))]
           [else (raise-argument-error who "input?" x)]))
 
   ; String Natural -> (values Natural Natural)
@@ -444,7 +454,7 @@
     #:property prop:object-name 2
     #:property prop:procedure
     (lambda (self x)
-      (let* ([in (->source (or (object-name self) 'parser) x)]
+      (let* ([in (new-source (or (object-name self) 'parser) x)]
              [m ((parser-run self) in 0)])
         (if (symbol? m)
             'error
@@ -596,18 +606,30 @@
   (define (fail in i)
     (unless (input? in)
       (raise-argument-error 'fail "input?" 0 in i))
-    (unless (exact-nonnegative-integer? i)
-      (raise-argument-error 'fail "exact-nonnegative-integer?" 1 in i))
+    (check-position 'fail in i 1 in i)
     (if (string? in) 'error (fail! in i)))
+
+  ; Symbol Input Any Natural Any ... -> Void
+  ; Raises an error for `who` unless `i`, its argument `n` of `args`, is
+  ; a position in the text of `in`, or just past its end.
+  (define (check-position who in i n . args)
+    (unless (exact-nonnegative-integer? i)
+      (apply raise-argument-error who "exact-nonnegative-integer?" n args))
+    (let ([s (input-text in)])
+      (unless (<= i (string-length s))
+        (raise-range-error who "input" "" i s 0 (string-length s)))))
 
   ; Parser Input Natural -> Match
   ; Runs `p` from position `i` of `in`, as the library's `run` does, but
   ; checks its arguments, and takes any Input, not only a Source, so a
-  ; Run can be tried on text directly.
+  ; Run can be tried on text directly. A Source is run over as it is, so
+  ; a Run that passes its own along keeps what the parse has noted.
   (define (run-input p in i)
     (unless (parser? p)
       (raise-argument-error 'run "parser?" 0 p in i))
-    (run p (->source 'run in) i)))
+    (let ([src (->source 'run in)])
+      (check-position 'run src i 2 p in i)
+      (run p src i))))
 
 (require 'private)
 
@@ -630,7 +652,7 @@
 ; find.
 (define (parse p x)
   (check-parsers 'parse p)
-  (let* ([in (->source 'parse x)]
+  (let* ([in (new-source 'parse x)]
          [m (run p in 0)])
     (if (and (matched? m)
              (if (eq? (source-scanner in) no-lexer)
