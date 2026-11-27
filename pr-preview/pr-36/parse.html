@@ -9,13 +9,14 @@
  may say more, a field to a line:
 </div><div class="SIntrapara"><ul><li><p><span class="stt">lexing:</span> where no token begins, over what a lexer made, the
 kind of token whose rule got furthest into the text there. The error
-is where that rule got to, rather than where the token would begin.</p></li><li><p><span class="stt">expected:</span> what would have matched where the parse got
+is where that rule got to, rather than where the token would begin.
+The grammar has no part in what a token is, so then this is the only
+field.</p></li><li><p><span class="stt">expected:</span> what would have matched where the parse got
 furthest: the text of a <span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._lit%29%29" class="RktValLink" data-pltdoc="x">lit</a></span>, a character of a <span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._span%29%29" class="RktValLink" data-pltdoc="x">span</a></span>
 given a string, the kind of a <span class="RktSym">tok</span>, the end of input, or the
 name of a named parser that would have begun there, rather than what&rsquo;s
 in it. Parsers given a predicate or a <a href="#%28tech._run%29" class="techoutside" data-pltdoc="x"><span class="techinside">Run</span></a>, <span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._rx%29%29" class="RktValLink" data-pltdoc="x">rx</a></span>, and
-<span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._where%29%29" class="RktValLink" data-pltdoc="x">where</a></span> don&rsquo;t say what they expect. It&rsquo;s left out inside a
-token, where <span class="stt">lexing:</span> says what was being read.</p></li><li><p><span class="stt">in:</span> the innermost parser named with <span class="RktSym"><a href="#%28form._%28%28lib._parser-combinator%2Fparse..rkt%29._define-parser%29%29" class="RktStxLink" data-pltdoc="x">define-parser</a></span>,
+<span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._where%29%29" class="RktValLink" data-pltdoc="x">where</a></span> don&rsquo;t say what they expect.</p></li><li><p><span class="stt">in:</span> the innermost parser named with <span class="RktSym"><a href="#%28form._%28%28lib._parser-combinator%2Fparse..rkt%29._define-parser%29%29" class="RktStxLink" data-pltdoc="x">define-parser</a></span>,
 or with <span class="RktSym"><a href="#%28form._%28%28submod._%28lib._parser-combinator%2Fparse..rkt%29._positions%29._parser%29%29" class="RktStxLink" data-pltdoc="x">parser</a></span> and a name, that the parse got furthest
 inside, having begun before it.</p></li></ul></div></p><p>To find what was expected, and where, <span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._parse%29%29" class="RktValLink" data-pltdoc="x">parse</a></span> runs <span class="RktVar">p</span>
  again over the same input, so the functions given to <span class="RktSym"><a href="#%28def._%28%28lib._parser-combinator%2Fparse..rkt%29._pmap%29%29" class="RktValLink" data-pltdoc="x">pmap</a></span> run
