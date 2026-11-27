@@ -96,7 +96,7 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
 ((seq (tok 'num) (lit "!")) (sum-lexer "5 !"))
 ]}
 
-@defproc[(with-lexer [lex lexer?] [p #,Parser]) #,Parser]{
+@defproc[(with-lexer [lex #,Lexer] [p #,Parser]) #,Parser]{
  produces a @Parser that matches what @racket[p] does, over the tokens
  that @racket[lex] finds from where it runs. This lets a grammar over
  characters use a grammar over tokens for part of its text, or lets a
@@ -115,7 +115,7 @@ A @Lexer is made by @racket[lexer]. It is a function: applied to a
 (eval:error (parse SUM-SETTING "sum=1 2;"))
 ]}
 
-@defproc[(tokens [lex lexer?] [str string?]) (listof token?)]{
+@defproc[(tokens [lex #,Lexer] [str string?]) (listof token?)]{
  produces the tokens that @racket[lex] finds in @racket[str], to show
  what a grammar over them sees. Where no rule matches, it raises
  @racket[exn:fail] with the message @racket[parse] would give,

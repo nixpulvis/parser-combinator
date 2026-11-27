@@ -5,11 +5,13 @@
                      racket/contract/base
                      parser-combinator/parse
                      parser-combinator/json
-                     (only-in parser-combinator/lex with-lexer lexer?)))
+                     (submod parser-combinator/json tokens)
+                     (only-in parser-combinator/lex with-lexer lexer? tok)))
 
 @(define Value @tech{Value})
 @(define JSON @tech{JSON})
 @(define Parser @tech{Parser})
+@(define Lexer @tech{Lexer})
 @(define json-site @link["https://www.json.org"]{JSON web site})
 
 @title[#:tag "json"]{JSON}
@@ -105,7 +107,7 @@ Whitespace belongs to the token after it. A value takes the whitespace
  and strings. They parse characters, not tokens, and match only their
  own text.
 
-@defthing[json-lexer lexer?]{
+@defthing[json-lexer #,Lexer]{
  produces an @tech{Input} from a string, using JSON's lexer. It reads
  tokens as a parser asks for them, skipping any whitespace before each:
  @racket[#\space], @racket[#\tab], @racket[#\newline], and
@@ -201,3 +203,30 @@ Whitespace belongs to the token after it. A value takes the whitespace
 (code:comment "\"a\": true")
 (parse PAIR "\"a\": true")
 ]}
+
+@; -----------------------------------------------------------------------------
+@section[#:tag "json-tokens"]{Grammar over Tokens}
+
+@defmodule[(submod parser-combinator/json tokens) #:packages ("parser-combinator")]
+
+These parsers are JSON's grammar over tokens: they match the tokens
+ that @racket[json-lexer] makes, such as @racket['begin-array] and
+ @racket['number], with @racket[tok], rather than characters, so they
+ never see whitespace. They need an @tech{Input} made by
+ @racket[json-lexer], or by another lexer that makes the same kinds of
+ token. @racket[VALUE], @racket[ARRAY], @racket[OBJECT], and
+ @racket[PAIR] are each one of them with @racket[json-lexer] around it,
+ by @racket[with-lexer], e.g. @racket[VALUE] is
+ @racket[(with-lexer json-lexer JSON-VALUE)].
+
+@defthing[JSON-VALUE #,Parser]{
+ matches what @racket[VALUE] does, over tokens.}
+
+@defthing[JSON-ARRAY #,Parser]{
+ matches what @racket[ARRAY] does, over tokens.}
+
+@defthing[JSON-OBJECT #,Parser]{
+ matches what @racket[OBJECT] does, over tokens.}
+
+@defthing[JSON-PAIR #,Parser]{
+ matches what @racket[PAIR] does, over tokens.}
