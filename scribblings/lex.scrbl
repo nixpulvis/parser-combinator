@@ -4,7 +4,8 @@
           (for-label racket/base
                      racket/contract/base
                      parser-combinator/parse
-                     parser-combinator/lex))
+                     parser-combinator/lex
+                     (only-in parser-combinator/json json-lexer)))
 
 @(define Parser @tech{Parser})
 @(define Input @tech{Input})
@@ -27,9 +28,11 @@ The two stages run together: a token is read when the grammar asks for
 
 @deftech{Lexer} : @racket[lexer?]
 
-A @Lexer is made by @racket[lexer]. It's a function: applied to a
- string, it makes an @Input of it, whose tokens a grammar over tokens
- matches.
+A @Lexer is made by @racket[lexer]. It is a function: applied to a
+ string, it makes an @Input whose tokens a grammar over tokens matches.
+ By convention, a lexer is named for the language it lexes, like
+ @racket[json-lexer], and parsers are named in capitals, like
+ @racket[SUM] below.
 
 @defproc[(lexer? [v any/c]) boolean?]{
  returns @racket[#t] if @racket[v] is a @Lexer, made by @racket[lexer].}
@@ -51,13 +54,13 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
  Only @racket[skip] may match nothing.
 
 @examples[#:eval lex-eval
-(define sums
+(define sum-lexer
   (lexer #:skip " "
          ['num (pmap string->number (rx #px"\\d+"))]
          ['plus (lit "+")]))
 (define SUM (sep-by+ (tok 'num) (tok 'plus)))
-(parse SUM (sums "1 + 2 +3"))
-(eval:error (parse SUM (sums "1 + + 2")))
+(parse SUM (sum-lexer "1 + 2 +3"))
+(eval:error (parse SUM (sum-lexer "1 + + 2")))
 ]
 
  As in @racket[alt], the rules are tried in order, and the first match
@@ -80,7 +83,7 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
 
 @examples[#:eval lex-eval
 (parse (seq (tok 'num 1) (tok 'plus) (tok 'num))
-       (sums "1+2"))
+       (sum-lexer "1+2"))
 (eval:error (parse (tok 'num) "1"))
 ]
 
@@ -89,8 +92,8 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
  so it doesn't skip what the lexer would skip before a token.
 
 @examples[#:eval lex-eval
-(parse (seq (tok 'num) (lit "!")) (sums "5!"))
-((seq (tok 'num) (lit "!")) (sums "5 !"))
+(parse (seq (tok 'num) (lit "!")) (sum-lexer "5!"))
+((seq (tok 'num) (lit "!")) (sum-lexer "5 !"))
 ]}
 
 @defproc[(with-lexer [lex lexer?] [p #,Parser]) #,Parser]{
@@ -106,10 +109,10 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
  directly.
 
 @examples[#:eval lex-eval
-(parse (seq (lit "sum=") (with-lexer sums SUM) (lit ";"))
-       "sum=1 + 2;")
-(eval:error (parse (seq (lit "sum=") (with-lexer sums SUM))
-                   "sum=1 2"))
+(define SUM-SETTING
+  (seq (lit "sum=") (with-lexer sum-lexer SUM) (lit ";")))
+(parse SUM-SETTING "sum=1 + 2;")
+(eval:error (parse SUM-SETTING "sum=1 2;"))
 ]}
 
 @defproc[(tokens [lex lexer?] [str string?]) (listof token?)]{
@@ -119,8 +122,8 @@ A @Lexer is made by @racket[lexer]. It's a function: applied to a
  including what it was lexing.
 
 @examples[#:eval lex-eval
-(tokens sums "1 + 2")
-(eval:error (tokens sums "1 + 2x"))
+(tokens sum-lexer "1 + 2")
+(eval:error (tokens sum-lexer "1 + 2x"))
 ]}
 
 @defstruct*[token ([kind symbol?]

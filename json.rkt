@@ -80,7 +80,7 @@
 ; Parser
 (define-parser JSON-ARRAY
   (unwrap (tok 'begin-array)
-          (sep-by* JSON-VALUE (tok 'comma))
+          (sep-by* JSON-VALUE (tok 'value-separator))
           (tok 'end-array)))
 
 ; Parser
@@ -89,15 +89,15 @@
           (for/hasheq ([pair (in-list pairs)])
             (values (car pair) (cdr pair))))
         (tok 'begin-object)
-        (sep-by* JSON-PAIR (tok 'comma))
+        (sep-by* JSON-PAIR (tok 'value-separator))
         (tok 'end-object)))
 
 ; Parser
 (define-parser JSON-PAIR
-  (pmap (lambda (name colon value)
+  (pmap (lambda (name separator value)
           (cons (string->symbol name) value))
         (tok 'string)
-        (tok 'colon)
+        (tok 'name-separator)
         JSON-VALUE))
 
 ; -------------------------------
@@ -270,8 +270,8 @@
          ['end-object (lit "}")]
          ['begin-array (lit "[")]
          ['end-array (lit "]")]
-         ['comma (lit ",")]
-         ['colon (lit ":")]
+         ['value-separator (lit ",")]
+         ['name-separator (lit ":")]
          ['null (pmap (const 'null) (lit "null"))]
          ['true (pmap (const #t) (lit "true"))]
          ['false (pmap (const #f) (lit "false"))]
